@@ -18,4 +18,4 @@ Installer steps:
 
 Notes:
 - The installer checks for the Visual C++ 2015-2022 runtime. If missing, it downloads and installs it.
-- The app currently bundles config.py with Supabase credentials. Treat the installer as sensitive.
+- The app reads Supabase credentials from a local .env file. Do not ship secrets in the repo.

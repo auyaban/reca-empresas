@@ -1,5 +1,8 @@
+import os
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
+
+from dotenv import load_dotenv
 from supabase import create_client, Client
 
 # ============================================
@@ -7,12 +10,13 @@ from supabase import create_client, Client
 # ============================================
 
 # Importar credenciales de configuración
-try:
-    from config import SUPABASE_URL, SUPABASE_KEY
-except ImportError:
-    messagebox.showerror("Error", "No se encontró el archivo config.py")
-    SUPABASE_URL = None
-    SUPABASE_KEY = None
+# Cargar credenciales desde .env
+load_dotenv()
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_KEY = os.getenv('SUPABASE_KEY')
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    messagebox.showerror('Error', 'Credenciales no configuradas (.env)')
 
 
 def conectar_supabase():
