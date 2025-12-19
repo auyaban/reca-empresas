@@ -1,22 +1,107 @@
-import os
+import os
+import sys
+import tempfile
+import subprocess
+
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
-
-from dotenv import load_dotenv
+
+import requests
+from dotenv import load_dotenv
 from supabase import create_client, Client
 
 # ============================================
-# CONFIGURACIÓN
+# CONFIGURACION
 # ============================================
 
-# Importar credenciales de configuración
-# Cargar credenciales desde .env
-load_dotenv()
-SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    messagebox.showerror('Error', 'Credenciales no configuradas (.env)')
+APP_NAME = "RECA Empresas"
+APP_VERSION = "1.0.0"
+GITHUB_OWNER = "auyaban"
+GITHUB_REPO = "reca-empresas"
+UPDATE_ASSET_NAME = "RECA_Setup.exe"
+
+def _get_env_path():
+    env_override = os.getenv("RECA_ENV_PATH")
+    if env_override:
+        return env_override
+    appdata = os.getenv("APPDATA")
+    if appdata:
+        return os.path.join(appdata, APP_NAME, ".env")
+    return os.path.join(os.getcwd(), ".env")
+
+def _load_credentials():
+    env_path = _get_env_path()
+    if os.path.exists(env_path):
+        load_dotenv(dotenv_path=env_path, override=True)
+    else:
+        load_dotenv()
+
+_load_credentials()
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    messagebox.showerror("Error", "Credenciales no configuradas (.env)")
+
+def _parse_version(value):
+    value = (value or "").strip().lstrip("v")
+    parts = value.split(".")
+    try:
+        return tuple(int(part) for part in parts)
+    except ValueError:
+        return ()
+
+def _is_newer_version(latest):
+    current = _parse_version(APP_VERSION)
+    latest_version = _parse_version(latest)
+    if not current or not latest_version:
+        return False
+    return latest_version > current
+
+def _get_latest_release():
+    url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+    response = requests.get(url, timeout=10)
+    if response.status_code != 200:
+        return None
+    return response.json()
+
+def _download_asset(release):
+    for asset in release.get("assets", []):
+        if asset.get("name") == UPDATE_ASSET_NAME:
+            download_url = asset.get("browser_download_url")
+            if not download_url:
+                return None
+            target = os.path.join(tempfile.gettempdir(), UPDATE_ASSET_NAME)
+            with requests.get(download_url, stream=True, timeout=60) as resp:
+                resp.raise_for_status()
+                with open(target, "wb") as handler:
+                    for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            handler.write(chunk)
+            return target
+    return None
+
+def _run_installer(installer_path):
+    args = [installer_path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    kwargs = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    subprocess.Popen(args, **kwargs)
+
+def check_for_updates():
+    try:
+        release = _get_latest_release()
+        if not release:
+            return False
+        if not _is_newer_version(release.get("tag_name", "")):
+            return False
+        installer_path = _download_asset(release)
+        if not installer_path:
+            return False
+        _run_installer(installer_path)
+        return True
+    except Exception:
+        return False
 
 
 def conectar_supabase():
@@ -762,6 +847,8 @@ class AppRECA:
 # ============================================
 
 if __name__ == "__main__":
+    if check_for_updates():
+        sys.exit(0)
     root = tk.Tk()
     app = AppRECA(root)
     root.mainloop()

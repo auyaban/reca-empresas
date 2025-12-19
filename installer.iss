@@ -2,6 +2,8 @@
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "RECA"
 #define MyAppExeName "RECA.exe"
+#define SupabaseUrl "https://zvhjosktmfisryqcjxbh.supabase.co"
+#define SupabaseKey "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2aGpvc2t0bWZpc3J5cWNqeGJoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5OTI4MjksImV4cCI6MjA4MTU2ODgyOX0.jU9Y7exHXD4oePKZ_zOOzYy8tX4p8yLK_N_kHXD-lgg"
 
 [Setup]
 AppId={{E5B8B38C-97C4-4B5C-9F59-7D2DA7E3A9C2}
@@ -41,4 +43,19 @@ begin
     Result := Installed = 1
   else
     Result := False;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  EnvPath: string;
+  EnvContent: string;
+begin
+  if CurStep = ssInstall then
+  begin
+    ForceDirectories(ExpandConstant('{userappdata}\\{#MyAppName}'));
+    EnvPath := ExpandConstant('{userappdata}\\{#MyAppName}\\.env');
+    EnvContent := 'SUPABASE_URL={#SupabaseUrl}' + #13#10 +
+                  'SUPABASE_KEY={#SupabaseKey}' + #13#10;
+    SaveStringToFile(EnvPath, EnvContent, False);
+  end;
 end;

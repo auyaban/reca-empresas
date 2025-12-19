@@ -18,4 +18,5 @@ Installer steps:
 
 Notes:
 - The installer checks for the Visual C++ 2015-2022 runtime. If missing, it downloads and installs it.
-- The app reads Supabase credentials from a local .env file. Do not ship secrets in the repo.
+- The installer writes a per-user .env file under AppData for Supabase credentials.
+- Auto-update uses GitHub Releases and expects an asset named RECA_Setup.exe in the latest release.
