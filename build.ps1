@@ -18,6 +18,7 @@ $python = Join-Path $venvPath "Scripts\\python.exe"
     --noconfirm `
     --clean `
     --windowed `
+    --add-data "logo\\logo_reca.png;logo" `
     --name "RECA" `
     --collect-all supabase `
     app.py

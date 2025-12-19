@@ -48,6 +48,92 @@ UPDATE_HASH_NAME = "RECA_Setup.exe.sha256"
 
 
 
+def _resource_path(relative_path):
+    base_dir = getattr(sys, "_MEIPASS", os.path.abspath(os.path.dirname(__file__)))
+    return os.path.join(base_dir, relative_path)
+
+LOGO_PATH = _resource_path(os.path.join("logo", "logo_reca.png"))
+
+
+class SplashScreen(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("RECA")
+        self.resizable(False, False)
+        self.configure(bg="white")
+        self.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        self.logo_image = None
+
+        container = tk.Frame(self, bg="white")
+        container.pack(fill=tk.BOTH, expand=True, padx=24, pady=20)
+
+        if os.path.exists(LOGO_PATH):
+            try:
+                logo = tk.PhotoImage(file=LOGO_PATH)
+                max_w, max_h = 240, 240
+                scale = max(1, logo.width() // max_w, logo.height() // max_h)
+                if scale > 1:
+                    logo = logo.subsample(scale, scale)
+                self.logo_image = logo
+                tk.Label(container, image=self.logo_image, bg="white").pack(pady=(0, 12))
+            except Exception:
+                self.logo_image = None
+
+        tk.Label(
+            container,
+            text="Bienvenido al sistema de gestion de empresas de RECA",
+            font=("Arial", 12, "bold"),
+            bg="white",
+            fg="#003366",
+            wraplength=420,
+            justify="center",
+        ).pack(pady=(0, 12))
+
+        self.status_label = tk.Label(
+            container,
+            text="Iniciando...",
+            font=("Arial", 10),
+            bg="white",
+            fg="#333333",
+        )
+        self.status_label.pack(pady=(0, 8))
+
+        self.progress = ttk.Progressbar(container, length=360, mode="determinate", maximum=100)
+        self.progress.pack(pady=(0, 12))
+
+        self.log_box = tk.Text(container, height=6, width=52, bg="#f5f5f5", bd=0)
+        self.log_box.configure(state="disabled")
+        self.log_box.pack(fill=tk.BOTH, expand=False)
+
+        self._center_window(520, 420)
+
+    def _center_window(self, width, height):
+        self.update_idletasks()
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        x = int((screen_w - width) / 2)
+        y = int((screen_h - height) / 2)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+
+    def set_status(self, message, progress=None):
+        if message:
+            self.status_label.config(text=message)
+            self._append_log(message)
+        if progress is not None:
+            self.progress["value"] = max(0, min(100, progress))
+        self.update_idletasks()
+
+    def _append_log(self, message):
+        self.log_box.configure(state="normal")
+        self.log_box.insert(tk.END, "- " + message + "\n")
+        self.log_box.see(tk.END)
+        self.log_box.configure(state="disabled")
+
+    def close(self):
+        self.destroy()
+
+
 def _get_appdata_dir():
 
     appdata = os.getenv("APPDATA")
@@ -885,18 +971,26 @@ class AppRECA:
 
 
 
-    def __init__(self, root):
+    def __init__(self, root, progress_callback=None, on_ready=None):
         """
         Inicializa la aplicacion
 
         Args:
             root: Ventana raiz de tkinter
+            progress_callback: Funcion para reportar avance
+            on_ready: Callback cuando la app termina de iniciar
         """
         self.root = root
         self.root.title("RECA - Gestion de Empresas")
         self.root.geometry("1400x750")
 
+        self._progress_callback = progress_callback
+        self._on_ready = on_ready
+        self._progress_value = 0
+        self._report_progress("Iniciando interfaz...", 5)
+
         # Inicializar variables
+        self._report_progress("Conectando a Supabase...", 15)
         self.supabase = conectar_supabase()
         self.empresas_actuales = []
         self._empresa_por_id = {}
@@ -909,8 +1003,23 @@ class AppRECA:
         self._sort_state = {}
 
         # Crear interfaz y cargar datos
+        self._report_progress("Construyendo interfaz...", 35)
         self.crear_interfaz()
+        self._report_progress("Cargando empresas...", 55)
         self.cargar_todas_empresas()
+
+    def _report_progress(self, message, value=None):
+        if value is not None:
+            self._progress_value = value
+        if self._progress_callback:
+            self._progress_callback(message, self._progress_value)
+
+    def _finish_ready(self):
+        if self._on_ready:
+            self._report_progress("Listo", 100)
+            callback = self._on_ready
+            self._on_ready = None
+            callback()
 
     def crear_interfaz(self):
 
@@ -1189,6 +1298,8 @@ class AppRECA:
             self._offset += len(data)
             self.empresas_actuales.extend(data)
             self._mostrar_empresas(data)
+            next_value = min(90, max(self._progress_value, 60) + 10)
+            self._report_progress(f"Cargando empresas... ({len(self.empresas_actuales)})", next_value)
             if len(data) < self.BATCH_SIZE:
                 self._all_loaded = True
             self._update_contador()
@@ -1304,14 +1415,12 @@ class AppRECA:
             pady=8
 
         ).pack(side=tk.LEFT, padx=5)
-
-
-
     def cargar_todas_empresas(self):
         """
         Carga empresas con paginacion por lotes.
         """
         if not self.supabase:
+            self._finish_ready()
             return
 
         self._search_term = ""
@@ -1321,6 +1430,8 @@ class AppRECA:
 
         if self._all_loaded and not self.empresas_actuales:
             messagebox.showinfo("Info", "No hay empresas en la base de datos")
+        self._finish_ready()
+
 
     def buscar_empresas(self):
         """Busca empresas segun el termino y campo seleccionado"""
@@ -1525,8 +1636,19 @@ class AppRECA:
 
 if __name__ == "__main__":
     LOG.info("App start version %s", APP_VERSION)
-    if check_for_updates():
-        sys.exit(0)
     root = tk.Tk()
-    app = AppRECA(root)
+    root.withdraw()
+    splash = SplashScreen(root)
+    splash.set_status("Buscando actualizaciones...", 5)
+    if check_for_updates():
+        splash.close()
+        root.destroy()
+        sys.exit(0)
+
+    def on_ready():
+        splash.close()
+        root.deiconify()
+
+    splash.set_status("Iniciando aplicacion...", 10)
+    app = AppRECA(root, progress_callback=splash.set_status, on_ready=on_ready)
     root.mainloop()
