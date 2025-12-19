@@ -24,6 +24,7 @@ build/
 dist/
 installer/
 *.spec
+RECA Empresas/
 
 # Virtualenv
 .venv/

@@ -1,3 +1,4 @@
+import hashlib
 import logging
 
 import logging.handlers
@@ -43,6 +44,7 @@ GITHUB_OWNER = "auyaban"
 GITHUB_REPO = "reca-empresas"
 
 UPDATE_ASSET_NAME = "RECA_Setup.exe"
+UPDATE_HASH_NAME = "RECA_Setup.exe.sha256"
 
 
 
@@ -192,37 +194,45 @@ def _get_latest_release():
 
     return response.json()
 
+def _get_asset_url(release, asset_name):
+    for asset in release.get("assets", []):
+        if asset.get("name") == asset_name:
+            return asset.get("browser_download_url")
+    return None
+
+
 
 
 def _download_asset(release):
+    download_url = _get_asset_url(release, UPDATE_ASSET_NAME)
+    if not download_url:
+        return None
+    target = os.path.join(tempfile.gettempdir(), UPDATE_ASSET_NAME)
+    with requests.get(download_url, stream=True, timeout=60) as resp:
+        resp.raise_for_status()
+        with open(target, "wb") as handler:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    handler.write(chunk)
+    return target
 
-    for asset in release.get("assets", []):
 
-        if asset.get("name") == UPDATE_ASSET_NAME:
+def _download_hash(release):
+    download_url = _get_asset_url(release, UPDATE_HASH_NAME)
+    if not download_url:
+        return None
+    response = requests.get(download_url, timeout=10)
+    response.raise_for_status()
+    return response.text.strip()
 
-            download_url = asset.get("browser_download_url")
 
-            if not download_url:
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handler:
+        for chunk in iter(lambda: handler.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
-                return None
-
-            target = os.path.join(tempfile.gettempdir(), UPDATE_ASSET_NAME)
-
-            with requests.get(download_url, stream=True, timeout=60) as resp:
-
-                resp.raise_for_status()
-
-                with open(target, "wb") as handler:
-
-                    for chunk in resp.iter_content(chunk_size=1024 * 1024):
-
-                        if chunk:
-
-                            handler.write(chunk)
-
-            return target
-
-    return None
 
 
 
@@ -257,17 +267,20 @@ def check_for_updates():
             return False
 
         installer_path = _download_asset(release)
-
         if not installer_path:
-
             LOG.error("Update asset not found in release %s", latest_tag)
-
             return False
-
-        LOG.info("Launching updater for version %s", latest_tag)
-
+        expected_hash = _download_hash(release)
+        if not expected_hash:
+            LOG.error("Update hash not found in release %s", latest_tag)
+            return False
+        expected_value = expected_hash.split()[0].lower()
+        actual_value = _sha256_file(installer_path).lower()
+        if expected_value != actual_value:
+            LOG.error("Update hash mismatch for %s", latest_tag)
+            return False
+        LOG.info("Update verified for version %s", latest_tag)
         _run_installer(installer_path)
-
         return True
 
     except Exception:
@@ -312,12 +325,12 @@ class FormularioEmpresa(tk.Toplevel):
     CAMPOS_CONFIG = [
         ("nombre_empresa", "Nombre Empresa *", True),
         ("nit", "NIT", False),
-        ("direccion", "Direcci?n", False),
+        ("direccion", "Dirección", False),
         ("ciudad", "Ciudad", False),
         ("correo_1", "Email(s)", False),
         ("contacto", "Contacto(s)", False),
         ("cargo", "Cargo", False),
-        ("telefono", "Tel?fono(s)", False),
+        ("telefono", "Teléfono(s)", False),
         ("sede", "Sede", False),
         ("zona", "Zona", False),
         ("responsable_visita", "Responsable Visita", False),
@@ -325,7 +338,7 @@ class FormularioEmpresa(tk.Toplevel):
         ("correo_asesor", "Email Asesor", False),
         ("profesional_asignado", "Profesional Asignado", False),
         ("correo_profesional", "Email Profesional", False),
-        ("caja_compensacion", "Caja Compensaci?n", False),
+        ("caja_compensacion", "Caja Compensación", False),
         ("estado", "Estado *", True),
         ("observaciones", "Observaciones", False),
     ]

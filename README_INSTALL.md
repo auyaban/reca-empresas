@@ -8,7 +8,7 @@ Build steps:
 1) Run:
    powershell -ExecutionPolicy Bypass -File build.ps1
 2) The executable is generated at:
-   dist\RECA.exe
+   dist\RECA\RECA.exe
 
 Installer steps:
 1) Open installer.iss in Inno Setup.
@@ -19,4 +19,4 @@ Installer steps:
 Notes:
 - The installer checks for the Visual C++ 2015-2022 runtime. If missing, it downloads and installs it.
 - The installer writes a per-user .env file under AppData for Supabase credentials.
-- Auto-update uses GitHub Releases and expects an asset named RECA_Setup.exe in the latest release.
+- Auto-update uses GitHub Releases and expects assets named RECA_Setup.exe and RECA_Setup.exe.sha256 in the latest release.

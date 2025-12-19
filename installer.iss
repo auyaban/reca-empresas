@@ -21,18 +21,18 @@ ArchitecturesInstallIn64BitMode=x64
 WizardStyle=modern
 
 [Files]
-Source: "dist\\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\\RECA\\*"; DestDir: "{app}\\RECA"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"
-Name: "{commondesktop}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\\{#MyAppName}"; Filename: "{app}\\RECA\\{#MyAppExeName}"
+Name: "{commondesktop}\\{#MyAppName}"; Filename: "{app}\\RECA\\{#MyAppExeName}"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Additional icons:"
 
 [Run]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$p=Join-Path $env:TEMP 'vc_redist.x64.exe'; if (!(Test-Path $p)) {{Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile $p}}; Start-Process -Wait -FilePath $p -ArgumentList '/install /quiet /norestart'"""; StatusMsg: "Installing Visual C++ Runtime..."; Check: not IsVCRuntimeInstalled; Flags: runhidden
-Filename: "{app}\\{#MyAppExeName}"; Description: "Launch RECA Empresas"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\\RECA\\{#MyAppExeName}"; Description: "Launch RECA Empresas"; Flags: nowait postinstall skipifsilent
 
 [Code]
 function IsVCRuntimeInstalled: Boolean;
