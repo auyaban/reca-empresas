@@ -37,7 +37,7 @@ from supabase import create_client, Client
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 
 GITHUB_OWNER = "auyaban"
 
@@ -45,6 +45,10 @@ GITHUB_REPO = "reca-empresas"
 
 UPDATE_ASSET_NAME = "RECA_Setup.exe"
 UPDATE_HASH_NAME = "RECA_Setup.exe.sha256"
+
+COLOR_PURPLE = "#7C3D96"
+COLOR_TEAL = "#07B499"
+COLOR_LIGHT_BG = "#F7F5FA"
 
 
 
@@ -86,7 +90,7 @@ class SplashScreen(tk.Toplevel):
             text="Bienvenido al sistema de gestion de empresas de RECA",
             font=("Arial", 12, "bold"),
             bg="white",
-            fg="#003366",
+            fg=COLOR_PURPLE,
             wraplength=420,
             justify="center",
         ).pack(pady=(0, 12))
@@ -96,14 +100,33 @@ class SplashScreen(tk.Toplevel):
             text="Iniciando...",
             font=("Arial", 10),
             bg="white",
-            fg="#333333",
+            fg=COLOR_TEAL,
         )
         self.status_label.pack(pady=(0, 8))
 
-        self.progress = ttk.Progressbar(container, length=360, mode="determinate", maximum=100)
+        style = ttk.Style(self)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure(
+            "Reca.Horizontal.TProgressbar",
+            background=COLOR_TEAL,
+            troughcolor="#EDE7F3",
+            bordercolor="#EDE7F3",
+            lightcolor=COLOR_TEAL,
+            darkcolor=COLOR_TEAL,
+        )
+        self.progress = ttk.Progressbar(
+            container,
+            length=360,
+            mode="determinate",
+            maximum=100,
+            style="Reca.Horizontal.TProgressbar",
+        )
         self.progress.pack(pady=(0, 12))
 
-        self.log_box = tk.Text(container, height=6, width=52, bg="#f5f5f5", bd=0)
+        self.log_box = tk.Text(container, height=6, width=52, bg="#F2EFF6", bd=0)
         self.log_box.configure(state="disabled")
         self.log_box.pack(fill=tk.BOTH, expand=False)
 
@@ -991,6 +1014,14 @@ class AppRECA:
         self.root.title("RECA - Gestion de Empresas")
         self.root.geometry("1400x750")
 
+        if os.path.exists(LOGO_PATH):
+            try:
+                icon = tk.PhotoImage(file=LOGO_PATH)
+                self.root.iconphoto(True, icon)
+                self._window_icon = icon
+            except Exception:
+                self._window_icon = None
+
         self._progress_callback = progress_callback
         self._on_ready = on_ready
         self._progress_value = 0
@@ -1059,142 +1090,94 @@ class AppRECA:
 
 
     def _crear_header(self):
-
-        """Crea el encabezado de la aplicación"""
-
-        header = tk.Frame(self.root, bg="#0066cc", height=80)
-
+        """Crea el encabezado de la aplicacion"""
+        header = tk.Frame(self.root, bg=COLOR_PURPLE, height=90)
         header.pack(fill=tk.X)
-
         header.pack_propagate(False)
+        header.grid_rowconfigure(0, weight=1)
+        header.grid_columnconfigure(1, weight=1)
 
-
+        self.header_logo = None
+        if os.path.exists(LOGO_PATH):
+            try:
+                logo = tk.PhotoImage(file=LOGO_PATH)
+                max_size = 56
+                scale = max(1, logo.width() // max_size, logo.height() // max_size)
+                if scale > 1:
+                    logo = logo.subsample(scale, scale)
+                self.header_logo = logo
+                tk.Label(header, image=self.header_logo, bg=COLOR_PURPLE).grid(
+                    row=0, column=0, padx=(16, 8), pady=12, sticky="w"
+                )
+            except Exception:
+                self.header_logo = None
 
         tk.Label(
-
             header,
-
-            text="RECA - Gestión de Empresas",
-
-            font=("Arial", 24, "bold"),
-
-            bg="#0066cc",
-
-            fg="white"
-
-        ).pack(pady=20)
-
-
+            text="RECA - Gestion de Empresas",
+            font=("Arial", 22, "bold"),
+            bg=COLOR_PURPLE,
+            fg="white",
+        ).grid(row=0, column=1, sticky="w", padx=(0, 16))
 
     def _crear_barra_busqueda(self):
-
-        """Crea la barra de búsqueda"""
-
-        search_frame = tk.Frame(self.root, bg="#f0f0f0", height=70)
-
+        """Crea la barra de busqueda"""
+        search_frame = tk.Frame(self.root, bg=COLOR_LIGHT_BG, height=70)
         search_frame.pack(fill=tk.X, pady=10, padx=20)
 
-
-
-        # Campo de búsqueda
-
+        # Campo de busqueda
         tk.Label(
-
             search_frame,
-
             text="Buscar:",
-
             font=("Arial", 12),
-
-            bg="#f0f0f0"
-
+            bg=COLOR_LIGHT_BG,
+            fg=COLOR_PURPLE,
         ).pack(side=tk.LEFT, padx=5)
-
-
 
         self.search_entry = tk.Entry(search_frame, font=("Arial", 12), width=40)
-
         self.search_entry.pack(side=tk.LEFT, padx=5)
-
         self.search_entry.bind("<Return>", lambda e: self.buscar_empresas())
 
-
-
         # Selector de campo
-
         tk.Label(
-
             search_frame,
-
             text="En:",
-
             font=("Arial", 12),
-
-            bg="#f0f0f0"
-
+            bg=COLOR_LIGHT_BG,
+            fg=COLOR_PURPLE,
         ).pack(side=tk.LEFT, padx=5)
-
-
 
         self.campo_busqueda = ttk.Combobox(
-
             search_frame,
-
             values=["Todos", "Nombre", "NIT", "Ciudad"],
-
             state="readonly",
-
-            width=12
-
+            width=12,
         )
-
         self.campo_busqueda.set("Todos")
-
         self.campo_busqueda.pack(side=tk.LEFT, padx=5)
 
-
-
-        # Botones de búsqueda
-
+        # Botones de busqueda
         tk.Button(
-
             search_frame,
-
             text="Buscar",
-
             command=self.buscar_empresas,
-
             font=("Arial", 11, "bold"),
-
-            bg="#0066cc",
-
+            bg=COLOR_PURPLE,
             fg="white",
-
             padx=10,
-
-            pady=5
-
+            pady=5,
         ).pack(side=tk.LEFT, padx=5)
-
-
 
         tk.Button(
-
             search_frame,
-
             text="Limpiar",
-
             command=self.limpiar_busqueda,
-
-            font=("Arial", 11),
-
+            font=("Arial", 11, "bold"),
+            bg=COLOR_TEAL,
+            fg="white",
             padx=10,
-
-            pady=5
-
+            pady=5,
         ).pack(side=tk.LEFT, padx=5)
-
-
 
     def _crear_tabla(self):
         """Crea la tabla de empresas con scrollbars"""
@@ -1330,98 +1313,54 @@ class AppRECA:
         self.contador_label.config(text=f"Resultados: {len(self.empresas_actuales)} empresas")
 
     def _crear_botones_accion(self):
-
-        """Crea los botones de acción principales"""
-
-        btn_frame = tk.Frame(self.root)
-
+        """Crea los botones de accion principales"""
+        btn_frame = tk.Frame(self.root, bg=COLOR_LIGHT_BG)
         btn_frame.pack(fill=tk.X, padx=20, pady=10)
 
-
-
         tk.Button(
-
             btn_frame,
-
             text="Nueva Empresa",
-
             command=self.nueva_empresa,
-
             font=("Arial", 12, "bold"),
-
-            bg="#28a745",
-
+            bg=COLOR_TEAL,
             fg="white",
-
             padx=15,
-
-            pady=8
-
+            pady=8,
         ).pack(side=tk.LEFT, padx=5)
 
-
-
         tk.Button(
-
             btn_frame,
-
             text="Editar",
-
             command=self.editar_empresa,
-
-            font=("Arial", 12),
-
-            bg="#ffc107",
-
+            font=("Arial", 12, "bold"),
+            bg=COLOR_PURPLE,
+            fg="white",
             padx=15,
-
-            pady=8
-
+            pady=8,
         ).pack(side=tk.LEFT, padx=5)
 
-
-
         tk.Button(
-
             btn_frame,
-
             text="Eliminar",
-
             command=self.eliminar_empresa,
-
-            font=("Arial", 12),
-
+            font=("Arial", 12, "bold"),
             bg="#dc3545",
-
             fg="white",
-
             padx=15,
-
-            pady=8
-
+            pady=8,
         ).pack(side=tk.LEFT, padx=5)
-
-
 
         tk.Button(
-
             btn_frame,
-
             text="Refrescar",
-
             command=self.cargar_todas_empresas,
-
-            font=("Arial", 12),
-
-            bg="#17a2b8",
-
+            font=("Arial", 12, "bold"),
+            bg=COLOR_TEAL,
             fg="white",
-
             padx=15,
-
-            pady=8
-
+            pady=8,
         ).pack(side=tk.LEFT, padx=5)
+
     def cargar_todas_empresas(self):
         """
         Carga empresas con paginacion por lotes.

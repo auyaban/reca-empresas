@@ -1,5 +1,5 @@
 #define MyAppName "RECA Empresas"
-#define MyAppVersion "1.0.4"
+#define MyAppVersion "1.0.5"
 #define MyAppPublisher "RECA"
 #define MyAppExeName "RECA.exe"
 #define SupabaseUrl "https://zvhjosktmfisryqcjxbh.supabase.co"
@@ -19,6 +19,7 @@ SolidCompression=yes
 PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64
 WizardStyle=modern
+SetupIconFile=logo\logo_reca.ico
 
 [Files]
 Source: "dist\\RECA\\*"; DestDir: "{app}\\RECA"; Flags: ignoreversion recursesubdirs createallsubdirs
