@@ -1,5 +1,5 @@
 #define MyAppName "RECA Empresas"
-#define MyAppVersion "1.0.3"
+#define MyAppVersion "1.0.4"
 #define MyAppPublisher "RECA"
 #define MyAppExeName "RECA.exe"
 #define SupabaseUrl "https://zvhjosktmfisryqcjxbh.supabase.co"

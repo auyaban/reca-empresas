@@ -37,7 +37,7 @@ from supabase import create_client, Client
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 
 GITHUB_OWNER = "auyaban"
 
@@ -1646,16 +1646,23 @@ if __name__ == "__main__":
     root = tk.Tk()
     root.withdraw()
     splash = SplashScreen(root)
-    splash.set_status("Buscando actualizaciones...", 5)
-    if check_for_updates():
-        splash.close()
-        root.destroy()
-        sys.exit(0)
+    splash.set_status("Preparando...", 5)
 
-    def on_ready():
-        splash.close()
-        root.deiconify()
+    def start_app():
+        splash.set_status("Buscando actualizaciones...", 10)
+        root.update_idletasks()
+        root.update()
+        if check_for_updates():
+            splash.close()
+            root.destroy()
+            sys.exit(0)
 
-    splash.set_status("Iniciando aplicacion...", 10)
-    app = AppRECA(root, progress_callback=splash.set_status, on_ready=on_ready)
+        def on_ready():
+            splash.close()
+            root.deiconify()
+
+        splash.set_status("Iniciando aplicacion...", 20)
+        AppRECA(root, progress_callback=splash.set_status, on_ready=on_ready)
+
+    root.after(50, start_app)
     root.mainloop()
