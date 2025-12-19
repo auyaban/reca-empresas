@@ -37,7 +37,7 @@ from supabase import create_client, Client
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 GITHUB_OWNER = "auyaban"
 
