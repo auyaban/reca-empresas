@@ -37,7 +37,7 @@ from supabase import create_client, Client
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 
 GITHUB_OWNER = "auyaban"
 
@@ -64,6 +64,7 @@ class SplashScreen(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", lambda: None)
 
         self.logo_image = None
+        self._closed = False
 
         container = tk.Frame(self, bg="white")
         container.pack(fill=tk.BOTH, expand=True, padx=24, pady=20)
@@ -117,6 +118,8 @@ class SplashScreen(tk.Toplevel):
         self.geometry(f"{width}x{height}+{x}+{y}")
 
     def set_status(self, message, progress=None):
+        if self._closed or not self.winfo_exists():
+            return
         if message:
             self.status_label.config(text=message)
             self._append_log(message)
@@ -131,6 +134,7 @@ class SplashScreen(tk.Toplevel):
         self.log_box.configure(state="disabled")
 
     def close(self):
+        self._closed = True
         self.destroy()
 
 
@@ -144,11 +148,14 @@ def _get_appdata_dir():
 
     return os.path.join(os.getcwd(), APP_NAME)
 
+def _get_log_dir():
+    return os.path.join("C:\\", "RECA", "logs")
+
 
 
 def _setup_logging():
 
-    log_dir = os.path.join(_get_appdata_dir(), "logs")
+    log_dir = _get_log_dir()
 
     os.makedirs(log_dir, exist_ok=True)
 
