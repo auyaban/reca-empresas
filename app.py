@@ -40,7 +40,7 @@ from supabase import create_client, Client
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.7"
 
 GITHUB_OWNER = "auyaban"
 
@@ -370,7 +370,7 @@ def _is_admin():
 
 def _run_installer(installer_path):
 
-    args = [installer_path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    args = [installer_path, "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
 
     kwargs = {}
 
@@ -378,22 +378,46 @@ def _run_installer(installer_path):
 
         if _is_admin():
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-            subprocess.Popen(args, **kwargs)
-            return True
+            try:
+                subprocess.Popen(args, **kwargs)
+                return True
+            except Exception:
+                LOG.exception("Failed to launch installer")
+                return False
 
-        params = " ".join(args[1:])
+        cmd = (
+            "$p=Start-Process -FilePath '{path}' "
+            "-ArgumentList {args} -Verb RunAs -Wait -PassThru; "
+            "exit $p.ExitCode"
+        ).format(
+            path=installer_path.replace("'", "''"),
+            args=",".join([f"'{arg}'" for arg in args[1:]]),
+        )
         try:
-            result = ctypes.windll.shell32.ShellExecuteW(None, "runas", installer_path, params, None, 1)
-            if result <= 32:
-                LOG.error("Failed to elevate installer (code %s)", result)
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", cmd],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                LOG.error("Installer exited with code %s", result.returncode)
+                if result.stdout:
+                    LOG.info("Installer stdout: %s", result.stdout.strip())
+                if result.stderr:
+                    LOG.error("Installer stderr: %s", result.stderr.strip())
                 return False
             return True
         except Exception:
             LOG.exception("Failed to launch installer with elevation")
             return False
 
-    subprocess.Popen(args, **kwargs)
-    return True
+    try:
+        subprocess.Popen(args, **kwargs)
+        return True
+    except Exception:
+        LOG.exception("Failed to launch installer")
+        return False
 
 
 
@@ -428,6 +452,7 @@ def check_for_updates():
             return False
         LOG.info("Update verified for version %s", latest_tag)
         if _run_installer(installer_path):
+            messagebox.showinfo("Actualización", "Se inició la instalación. La aplicación se cerrará.")
             return True
         return False
 
