@@ -1,15 +1,18 @@
+# -*- coding: utf-8 -*-
 import hashlib
 import logging
 
 import logging.handlers
 
 import os
+import re
 
 import subprocess
 
 import sys
 
 import tempfile
+import ctypes
 
 
 
@@ -49,6 +52,8 @@ UPDATE_HASH_NAME = "RECA_Setup.exe.sha256"
 COLOR_PURPLE = "#7C3D96"
 COLOR_TEAL = "#07B499"
 COLOR_LIGHT_BG = "#F7F5FA"
+
+REQUEST_HEADERS = {"User-Agent": f"{APP_NAME}/{APP_VERSION}"}
 
 
 
@@ -172,7 +177,8 @@ def _get_appdata_dir():
     return os.path.join(os.getcwd(), APP_NAME)
 
 def _get_log_dir():
-    return os.path.join("C:\\", "RECA", "logs")
+    base_dir = os.getenv("LOCALAPPDATA") or os.getenv("APPDATA") or _get_appdata_dir()
+    return os.path.join(base_dir, APP_NAME, "logs")
 
 
 
@@ -180,7 +186,11 @@ def _setup_logging():
 
     log_dir = _get_log_dir()
 
-    os.makedirs(log_dir, exist_ok=True)
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+    except OSError:
+        log_dir = os.path.join(tempfile.gettempdir(), APP_NAME, "logs")
+        os.makedirs(log_dir, exist_ok=True)
 
     logger = logging.getLogger("reca")
 
@@ -257,12 +267,11 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-
-    LOG.error("Missing Supabase credentials")
-
-    messagebox.showerror("Error", "Credenciales no configuradas (.env)")
+def _ensure_credentials():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        LOG.error("Missing Supabase credentials")
+        return False
+    return True
 
 
 
@@ -300,7 +309,7 @@ def _get_latest_release():
 
     url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 
-    response = requests.get(url, timeout=10)
+    response = requests.get(url, timeout=10, headers=REQUEST_HEADERS)
 
     if response.status_code != 200:
 
@@ -324,7 +333,7 @@ def _download_asset(release):
     if not download_url:
         return None
     target = os.path.join(tempfile.gettempdir(), UPDATE_ASSET_NAME)
-    with requests.get(download_url, stream=True, timeout=60) as resp:
+    with requests.get(download_url, stream=True, timeout=60, headers=REQUEST_HEADERS) as resp:
         resp.raise_for_status()
         with open(target, "wb") as handler:
             for chunk in resp.iter_content(chunk_size=1024 * 1024):
@@ -337,7 +346,7 @@ def _download_hash(release):
     download_url = _get_asset_url(release, UPDATE_HASH_NAME)
     if not download_url:
         return None
-    response = requests.get(download_url, timeout=10)
+    response = requests.get(download_url, timeout=10, headers=REQUEST_HEADERS)
     response.raise_for_status()
     return response.text.strip()
 
@@ -352,6 +361,13 @@ def _sha256_file(path):
 
 
 
+def _is_admin():
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
 def _run_installer(installer_path):
 
     args = [installer_path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
@@ -360,9 +376,24 @@ def _run_installer(installer_path):
 
     if os.name == "nt":
 
-        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        if _is_admin():
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            subprocess.Popen(args, **kwargs)
+            return True
+
+        params = " ".join(args[1:])
+        try:
+            result = ctypes.windll.shell32.ShellExecuteW(None, "runas", installer_path, params, None, 1)
+            if result <= 32:
+                LOG.error("Failed to elevate installer (code %s)", result)
+                return False
+            return True
+        except Exception:
+            LOG.exception("Failed to launch installer with elevation")
+            return False
 
     subprocess.Popen(args, **kwargs)
+    return True
 
 
 
@@ -396,8 +427,9 @@ def check_for_updates():
             LOG.error("Update hash mismatch for %s", latest_tag)
             return False
         LOG.info("Update verified for version %s", latest_tag)
-        _run_installer(installer_path)
-        return True
+        if _run_installer(installer_path):
+            return True
+        return False
 
     except Exception:
 
@@ -416,7 +448,7 @@ def conectar_supabase():
     Returns:
         Client: Cliente de Supabase o None si hay error
     """
-    if not SUPABASE_URL or not SUPABASE_KEY:
+    if not _ensure_credentials():
         messagebox.showerror("Error", "Credenciales no configuradas")
         return None
     try:
@@ -440,15 +472,15 @@ class FormularioEmpresa(tk.Toplevel):
     # Configuracion de campos del formulario
     CAMPOS_CONFIG = [
         ("nombre_empresa", "Nombre Empresa *", True),
-        ("nit", "NIT", False),
-        ("direccion", "Dirección", False),
-        ("ciudad", "Ciudad", False),
+        ("nit_empresa", "NIT", False),
+        ("direccion_empresa", "Dirección", False),
+        ("ciudad_empresa", "Ciudad", False),
         ("correo_1", "Email(s)", False),
-        ("contacto", "Contacto(s)", False),
+        ("contacto_empresa", "Contacto(s)", False),
         ("cargo", "Cargo", False),
-        ("telefono", "Teléfono(s)", False),
-        ("sede", "Sede", False),
-        ("zona", "Zona", False),
+        ("telefono_empresa", "Teléfono(s)", False),
+        ("sede_empresa", "Sede", False),
+        ("zona_empresa", "Zona", False),
         ("responsable_visita", "Responsable Visita", False),
         ("asesor", "Asesor", False),
         ("correo_asesor", "Email Asesor", False),
@@ -460,6 +492,7 @@ class FormularioEmpresa(tk.Toplevel):
     ]
 
     ESTADOS_DISPONIBLES = ["Activa", "En Proceso", "Pausada", "Cerrada", "Inactiva"]
+    CAJAS_COMPENSACION = ["Compensar", "No Compensar"]
 
     def __init__(self, parent, supabase, empresa=None):
         """
@@ -598,6 +631,10 @@ class FormularioEmpresa(tk.Toplevel):
 
                 widget = self._crear_campo_estado(parent)
 
+            elif campo == "caja_compensacion":
+
+                widget = self._crear_campo_caja_compensacion(parent)
+
             elif campo == "observaciones":
 
                 widget = self._crear_campo_observaciones(parent)
@@ -682,6 +719,23 @@ class FormularioEmpresa(tk.Toplevel):
 
         return widget
 
+    def _crear_campo_caja_compensacion(self, parent):
+        """Crea combobox para el campo caja de compensacion"""
+        widget = ttk.Combobox(
+            parent,
+            values=self.CAJAS_COMPENSACION,
+            state="readonly",
+            width=40,
+            font=("Arial", 10)
+        )
+
+        if self.empresa:
+            valor = self.empresa.get("caja_compensacion", "Compensar") or "Compensar"
+            widget.set(valor)
+        else:
+            widget.set("Compensar")
+
+        return widget
 
 
     def _crear_campo_texto(self, parent, campo):
@@ -961,9 +1015,9 @@ class AppRECA:
 
     COLUMNAS = (
 
-        "nombre_empresa", "nit", "ciudad", "estado", "zona",
+        "nombre_empresa", "nit_empresa", "ciudad_empresa", "estado", "zona_empresa",
 
-        "profesional_asignado", "asesor", "contacto", "telefono", "sede"
+        "profesional_asignado", "asesor", "contacto_empresa", "telefono_empresa", "sede_empresa"
 
     )
 
@@ -973,24 +1027,37 @@ class AppRECA:
 
         "nombre_empresa": 250,
 
-        "nit": 100,
+        "nit_empresa": 100,
 
-        "ciudad": 100,
+        "ciudad_empresa": 100,
 
         "estado": 100,
 
-        "zona": 120,
+        "zona_empresa": 120,
 
         "profesional_asignado": 150,
 
         "asesor": 130,
 
-        "contacto": 150,
+        "contacto_empresa": 150,
 
-        "telefono": 100,
+        "telefono_empresa": 100,
 
-        "sede": 100
+        "sede_empresa": 100
 
+    }
+
+    COLUMN_LABELS = {
+        "nombre_empresa": "Nombre Empresa",
+        "nit_empresa": "NIT",
+        "ciudad_empresa": "Ciudad",
+        "estado": "Estado",
+        "zona_empresa": "Zona",
+        "profesional_asignado": "Profesional Asignado",
+        "asesor": "Asesor",
+        "contacto_empresa": "Contacto(s)",
+        "telefono_empresa": "Teléfono(s)",
+        "sede_empresa": "Sede",
     }
 
 
@@ -1039,6 +1106,17 @@ class AppRECA:
         self._search_term = ""
         self._search_field = "Todos"
         self._sort_state = {}
+        self._profesionales_cache = []
+        self._filters = {
+            "profesional_asignado": None,
+            "asesor": None,
+            "caja_compensacion": None,
+            "zona_empresa": None,
+            "estado": None,
+        }
+        self._filtros_visible = False
+        self._filtros_loaded = False
+        self._filtros_loading = False
 
         # Crear interfaz y cargar datos
         self._report_progress("Construyendo interfaz...", 35)
@@ -1074,6 +1152,10 @@ class AppRECA:
         # Barra de búsqueda
 
         self._crear_barra_busqueda()
+
+        # Filtros avanzados
+
+        self._crear_filtros()
 
 
 
@@ -1134,9 +1216,18 @@ class AppRECA:
             fg=COLOR_PURPLE,
         ).pack(side=tk.LEFT, padx=5)
 
-        self.search_entry = tk.Entry(search_frame, font=("Arial", 12), width=40)
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Combobox(
+            search_frame,
+            textvariable=self.search_var,
+            values=[],
+            font=("Arial", 12),
+            width=38,
+            state="normal",
+        )
         self.search_entry.pack(side=tk.LEFT, padx=5)
         self.search_entry.bind("<Return>", lambda e: self.buscar_empresas())
+        self.search_entry.bind("<KeyRelease>", lambda e: self._update_autocomplete())
 
         # Selector de campo
         tk.Label(
@@ -1149,12 +1240,13 @@ class AppRECA:
 
         self.campo_busqueda = ttk.Combobox(
             search_frame,
-            values=["Todos", "Nombre", "NIT", "Ciudad"],
+            values=["Todos", "Nombre", "NIT", "Ciudad", "Profesional"],
             state="readonly",
             width=12,
         )
         self.campo_busqueda.set("Todos")
         self.campo_busqueda.pack(side=tk.LEFT, padx=5)
+        self.campo_busqueda.bind("<<ComboboxSelected>>", lambda e: self._on_search_field_change())
 
         # Botones de busqueda
         tk.Button(
@@ -1178,6 +1270,89 @@ class AppRECA:
             padx=10,
             pady=5,
         ).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(
+            search_frame,
+            text="Filtros",
+            command=self._toggle_filtros,
+            font=("Arial", 11, "bold"),
+            bg="#455A64",
+            fg="white",
+            padx=10,
+            pady=5,
+        ).pack(side=tk.LEFT, padx=5)
+
+    def _crear_filtros(self):
+        self.filtros_frame = tk.Frame(self.root, bg=COLOR_LIGHT_BG)
+
+        tk.Label(
+            self.filtros_frame,
+            text="Filtros:",
+            font=("Arial", 12, "bold"),
+            bg=COLOR_LIGHT_BG,
+            fg=COLOR_PURPLE,
+        ).grid(row=0, column=0, sticky="w", padx=5, pady=5)
+
+        self.filtro_profesional = self._crear_filtro_combo(
+            self.filtros_frame, "Profesional", 0, 1
+        )
+        self.filtro_asesor = self._crear_filtro_combo(
+            self.filtros_frame, "Asesor", 0, 3
+        )
+        self.filtro_caja = self._crear_filtro_combo(
+            self.filtros_frame, "Caja Compensación", 0, 5
+        )
+        self.filtro_zona = self._crear_filtro_combo(
+            self.filtros_frame, "Zona", 1, 1
+        )
+        self.filtro_estado = self._crear_filtro_combo(
+            self.filtros_frame, "Estado", 1, 3
+        )
+
+        tk.Button(
+            self.filtros_frame,
+            text="Aplicar",
+            command=self.aplicar_filtros,
+            font=("Arial", 10, "bold"),
+            bg=COLOR_PURPLE,
+            fg="white",
+            padx=10,
+            pady=4,
+        ).grid(row=1, column=5, padx=5, pady=5, sticky="w")
+
+        tk.Button(
+            self.filtros_frame,
+            text="Limpiar Filtros",
+            command=self.limpiar_filtros,
+            font=("Arial", 10, "bold"),
+            bg=COLOR_TEAL,
+            fg="white",
+            padx=10,
+            pady=4,
+        ).grid(row=1, column=6, padx=5, pady=5, sticky="w")
+
+        self.filtros_frame.grid_columnconfigure(2, minsize=8)
+        self.filtros_frame.grid_columnconfigure(4, minsize=8)
+
+    def _crear_filtro_combo(self, parent, label, row, col):
+        tk.Label(
+            parent,
+            text=f"{label}:",
+            font=("Arial", 10),
+            bg=COLOR_LIGHT_BG,
+            fg=COLOR_PURPLE,
+        ).grid(row=row, column=col, sticky="e", padx=5, pady=5)
+
+        combo = ttk.Combobox(
+            parent,
+            values=["Todos"],
+            state="readonly",
+            width=24,
+            font=("Arial", 10),
+        )
+        combo.set("Todos")
+        combo.grid(row=row, column=col + 1, sticky="w", padx=5, pady=5)
+        return combo
 
     def _crear_tabla(self):
         """Crea la tabla de empresas con scrollbars"""
@@ -1205,7 +1380,7 @@ class AppRECA:
             # Encabezado con funcion de ordenamiento
             self.tree.heading(
                 col,
-                text=col.replace("_", " ").title(),
+                text=self.COLUMN_LABELS.get(col, col.replace("_", " ").title()),
                 command=lambda c=col: self.ordenar_columna(c)
             )
             # Ancho de columna
@@ -1246,37 +1421,47 @@ class AppRECA:
         self.empresa_seleccionada = None
         self._limpiar_tabla()
         self._update_contador()
+        self._update_autocomplete_values()
 
     def _build_or_filter(self, term):
-        safe_term = term.replace(",", " ")
+        safe_term = self._sanitize_search_term(term)
         columnas = [
             "nombre_empresa",
-            "nit",
-            "ciudad",
+            "nit_empresa",
+            "ciudad_empresa",
             "estado",
-            "zona",
+            "zona_empresa",
             "profesional_asignado",
             "asesor",
-            "contacto",
-            "telefono",
-            "sede",
+            "contacto_empresa",
+            "telefono_empresa",
+            "sede_empresa",
         ]
         return ",".join([f"{col}.ilike.%{safe_term}%" for col in columnas])
+
+    def _sanitize_search_term(self, term):
+        safe_term = re.sub(r"[^\w\s@.-]", " ", term, flags=re.UNICODE)
+        safe_term = re.sub(r"\s+", " ", safe_term).strip()
+        return safe_term
 
     def _load_next_page(self):
         if not self.supabase or self._all_loaded or self._is_loading:
             return
         self._is_loading = True
         try:
-            query = self.supabase.table("empresas").select("*")
+            query = self.supabase.table("empresas").select("*").order("id", desc=False)
+            for col, value in self._filters.items():
+                if value and value != "Todos":
+                    query = query.eq(col, value)
             if self._search_term:
                 if self._search_field == "Todos":
                     query = query.or_(self._build_or_filter(self._search_term))
                 else:
                     campo_columna = {
                         "Nombre": "nombre_empresa",
-                        "NIT": "nit",
-                        "Ciudad": "ciudad",
+                        "NIT": "nit_empresa",
+                        "Ciudad": "ciudad_empresa",
+                        "Profesional": "profesional_asignado",
                     }.get(self._search_field, "nombre_empresa")
                     query = query.ilike(campo_columna, f"%{self._search_term}%")
             query = query.range(self._offset, self._offset + self.BATCH_SIZE - 1)
@@ -1293,6 +1478,7 @@ class AppRECA:
             if len(data) < self.BATCH_SIZE:
                 self._all_loaded = True
             self._update_contador()
+            self._update_autocomplete_values()
             if not self._all_loaded:
                 self.root.after(0, self._maybe_load_next)
         except Exception as e:
@@ -1388,6 +1574,10 @@ class AppRECA:
         if not termino:
             self.cargar_todas_empresas()
             return
+        termino = self._sanitize_search_term(termino)
+        if not termino:
+            messagebox.showwarning("Aviso", "Ingresa un texto de busqueda valido")
+            return
 
         self._search_term = termino
         self._search_field = self.campo_busqueda.get()
@@ -1399,20 +1589,122 @@ class AppRECA:
 
     def limpiar_busqueda(self):
         """Limpia el campo de busqueda y recarga todas las empresas"""
-        self.search_entry.delete(0, tk.END)
+        self.search_entry.set("")
         self.campo_busqueda.set("Todos")
         self.cargar_todas_empresas()
+        self._update_autocomplete()
+
+    def _on_search_field_change(self):
+        self._search_field = self.campo_busqueda.get()
+        self._update_autocomplete_values()
+        self._update_autocomplete()
+
+    def _update_autocomplete_values(self):
+        if self._search_field == "Profesional":
+            profesionales = []
+            for empresa in self.empresas_actuales:
+                valor = (empresa.get("profesional_asignado") or "").strip()
+                if valor:
+                    profesionales.append(valor)
+            self._profesionales_cache = sorted(set(profesionales))
+        else:
+            self._profesionales_cache = []
+        if self._search_field != "Profesional":
+            self.search_entry["values"] = []
+
+    def _update_autocomplete(self):
+        if self.campo_busqueda.get() != "Profesional":
+            return
+        term = self.search_entry.get().strip().lower()
+        if not term:
+            self.search_entry["values"] = self._profesionales_cache
+            return
+        matches = [p for p in self._profesionales_cache if term in p.lower()]
+        self.search_entry["values"] = matches
+
+    def _toggle_filtros(self):
+        if self._filtros_visible:
+            self.filtros_frame.pack_forget()
+            self._filtros_visible = False
+            return
+        self.filtros_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
+        self._filtros_visible = True
+        if not self._filtros_loaded:
+            self._load_filter_options()
+
+    def _load_filter_options(self):
+        if not self.supabase or self._filtros_loading:
+            return
+        self._filtros_loading = True
+        options = {
+            "profesional_asignado": set(),
+            "asesor": set(),
+            "caja_compensacion": set(),
+            "zona_empresa": set(),
+            "estado": set(),
+        }
+        offset = 0
+        try:
+            while True:
+                query = (self.supabase.table("empresas")
+                         .select("profesional_asignado, asesor, caja_compensacion, zona_empresa, estado")
+                         .order("id", desc=False)
+                         .range(offset, offset + self.BATCH_SIZE - 1))
+                data = query.execute().data or []
+                if not data:
+                    break
+                for row in data:
+                    for key in options:
+                        valor = (row.get(key) or "").strip()
+                        if valor:
+                            options[key].add(valor)
+                offset += len(data)
+                if len(data) < self.BATCH_SIZE:
+                    break
+        except Exception:
+            LOG.exception("Error cargando opciones de filtros")
+        finally:
+            self._filtros_loading = False
+
+        self.filtro_profesional["values"] = ["Todos"] + sorted(options["profesional_asignado"])
+        self.filtro_asesor["values"] = ["Todos"] + sorted(options["asesor"])
+        self.filtro_caja["values"] = ["Todos"] + sorted(options["caja_compensacion"])
+        self.filtro_zona["values"] = ["Todos"] + sorted(options["zona_empresa"])
+        self.filtro_estado["values"] = ["Todos"] + sorted(options["estado"])
+        self._filtros_loaded = True
+
+    def aplicar_filtros(self):
+        self._filters = {
+            "profesional_asignado": self.filtro_profesional.get(),
+            "asesor": self.filtro_asesor.get(),
+            "caja_compensacion": self.filtro_caja.get(),
+            "zona_empresa": self.filtro_zona.get(),
+            "estado": self.filtro_estado.get(),
+        }
+        self._reset_paginacion()
+        self._load_next_page()
+
+    def limpiar_filtros(self):
+        self.filtro_profesional.set("Todos")
+        self.filtro_asesor.set("Todos")
+        self.filtro_caja.set("Todos")
+        self.filtro_zona.set("Todos")
+        self.filtro_estado.set("Todos")
+        for key in self._filters:
+            self._filters[key] = None
+        self._reset_paginacion()
+        self._load_next_page()
 
     def _sort_key(self, value):
         if value is None:
-            return ""
+            return (1, "")
         value = str(value).strip()
         if not value:
-            return ""
+            return (1, "")
         try:
-            return float(value.replace(",", "."))
+            return (0, float(value.replace(",", ".")))
         except ValueError:
-            return value.lower()
+            return (1, value.lower())
 
     def ordenar_columna(self, col):
         """Ordena la tabla por la columna seleccionada (toggle asc/desc)"""
@@ -1565,15 +1857,15 @@ class AppRECA:
                 self._empresa_por_id[empresa_id_str] = empresa
             self.tree.insert("", tk.END, values=(
                 empresa.get("nombre_empresa", ""),
-                empresa.get("nit", ""),
-                empresa.get("ciudad", ""),
+                empresa.get("nit_empresa", ""),
+                empresa.get("ciudad_empresa", ""),
                 empresa.get("estado", ""),
-                empresa.get("zona", ""),
+                empresa.get("zona_empresa", ""),
                 empresa.get("profesional_asignado", ""),
                 empresa.get("asesor", ""),
-                empresa.get("contacto", ""),
-                empresa.get("telefono", ""),
-                empresa.get("sede", ""),
+                empresa.get("contacto_empresa", ""),
+                empresa.get("telefono_empresa", ""),
+                empresa.get("sede_empresa", ""),
             ), tags=(empresa_id_str,) if empresa_id_str else ())
 
 # ============================================
@@ -1595,6 +1887,12 @@ if __name__ == "__main__":
             splash.close()
             root.destroy()
             sys.exit(0)
+
+        if not _ensure_credentials():
+            messagebox.showerror("Error", "Credenciales no configuradas (.env)")
+            splash.close()
+            root.destroy()
+            sys.exit(1)
 
         def on_ready():
             splash.close()
