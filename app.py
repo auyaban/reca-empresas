@@ -41,7 +41,7 @@ from supabase import create_client, Client
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.0.10"
 
 GITHUB_OWNER = "auyaban"
 
@@ -398,50 +398,49 @@ def _is_admin():
 
 def _run_installer(installer_path):
 
-    args = [installer_path, "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
-
-    kwargs = {}
+    args = ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/FORCECLOSEAPPLICATIONS"]
 
     if os.name == "nt":
-
-        if _is_admin():
-            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-            try:
-                subprocess.Popen(args, **kwargs)
-                return True
-            except Exception:
-                LOG.exception("Failed to launch installer")
-                return False
-
-        cmd = (
-            "$p=Start-Process -FilePath '{path}' "
-            "-ArgumentList {args} -Verb RunAs -Wait -PassThru; "
-            "exit $p.ExitCode"
-        ).format(
-            path=installer_path.replace("'", "''"),
-            args=",".join([f"'{arg}'" for arg in args[1:]]),
-        )
         try:
-            result = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", cmd],
-                check=False,
-                capture_output=True,
-                text=True,
+            current_pid = os.getpid()
+            installer_ps = installer_path.replace("'", "''")
+
+            if getattr(sys, "frozen", False):
+                relaunch_file = sys.executable.replace("'", "''")
+                relaunch_args = "@()"
+            else:
+                relaunch_file = sys.executable.replace("'", "''")
+                relaunch_args = "@('{0}')".format(os.path.abspath(__file__).replace("'", "''"))
+
+            args_ps = ",".join([f"'{arg}'" for arg in args])
+            cmd = (
+                "$installer='{installer}'; "
+                "$installerArgs=@({installer_args}); "
+                "$pidToWait={pid}; "
+                "while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) "
+                "{{ Start-Sleep -Milliseconds 300 }}; "
+                "$p=Start-Process -FilePath $installer -ArgumentList $installerArgs -Verb RunAs -Wait -PassThru; "
+                "if ($p.ExitCode -eq 0) "
+                "{{ Start-Process -FilePath '{relaunch_file}' -ArgumentList {relaunch_args} }}; "
+                "exit $p.ExitCode"
+            ).format(
+                installer=installer_ps,
+                installer_args=args_ps,
+                pid=current_pid,
+                relaunch_file=relaunch_file,
+                relaunch_args=relaunch_args,
             )
-            if result.returncode != 0:
-                LOG.error("Installer exited with code %s", result.returncode)
-                if result.stdout:
-                    LOG.info("Installer stdout: %s", result.stdout.strip())
-                if result.stderr:
-                    LOG.error("Installer stderr: %s", result.stderr.strip())
-                return False
+            subprocess.Popen(
+                ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", cmd],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
             return True
         except Exception:
-            LOG.exception("Failed to launch installer with elevation")
+            LOG.exception("Failed to launch installer helper")
             return False
 
     try:
-        subprocess.Popen(args, **kwargs)
+        subprocess.Popen([installer_path] + args)
         return True
     except Exception:
         LOG.exception("Failed to launch installer")
@@ -480,17 +479,9 @@ def check_for_updates():
             return False
         LOG.info("Update verified for version %s", latest_tag)
         if _run_installer(installer_path):
-            if _restart_application():
-                messagebox.showinfo(
-                    "Actualización",
-                    "La instalación terminó correctamente. La aplicación se reiniciará.",
-                )
-                return True
-            LOG.error("Update installed but restart failed")
-            messagebox.showerror(
+            messagebox.showinfo(
                 "Actualización",
-                "La actualización se instaló, pero no se pudo reiniciar automáticamente.\n"
-                f"Abre la aplicación manualmente. Logs: {_get_error_log_path()}",
+                "Se iniciará la instalación. La aplicación se cerrará y se abrirá al finalizar.",
             )
             return True
         LOG.error("Update installer failed for %s", latest_tag)
