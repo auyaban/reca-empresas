@@ -41,7 +41,7 @@ from supabase import create_client, Client
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.10"
+APP_VERSION = "1.0.11"
 
 GITHUB_OWNER = "auyaban"
 
@@ -398,52 +398,71 @@ def _is_admin():
 
 def _run_installer(installer_path):
 
-    args = ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/FORCECLOSEAPPLICATIONS"]
+    args = ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
 
-    if os.name == "nt":
+    if os.name != "nt":
         try:
-            current_pid = os.getpid()
-            installer_ps = installer_path.replace("'", "''")
-
-            if getattr(sys, "frozen", False):
-                relaunch_file = sys.executable.replace("'", "''")
-                relaunch_args = "@()"
-            else:
-                relaunch_file = sys.executable.replace("'", "''")
-                relaunch_args = "@('{0}')".format(os.path.abspath(__file__).replace("'", "''"))
-
-            args_ps = ",".join([f"'{arg}'" for arg in args])
-            cmd = (
-                "$installer='{installer}'; "
-                "$installerArgs=@({installer_args}); "
-                "$pidToWait={pid}; "
-                "while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) "
-                "{{ Start-Sleep -Milliseconds 300 }}; "
-                "$p=Start-Process -FilePath $installer -ArgumentList $installerArgs -Verb RunAs -Wait -PassThru; "
-                "if ($p.ExitCode -eq 0) "
-                "{{ Start-Process -FilePath '{relaunch_file}' -ArgumentList {relaunch_args} }}; "
-                "exit $p.ExitCode"
-            ).format(
-                installer=installer_ps,
-                installer_args=args_ps,
-                pid=current_pid,
-                relaunch_file=relaunch_file,
-                relaunch_args=relaunch_args,
-            )
-            subprocess.Popen(
-                ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", cmd],
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
+            subprocess.Popen([installer_path] + args)
             return True
         except Exception:
-            LOG.exception("Failed to launch installer helper")
+            LOG.exception("Failed to launch installer")
             return False
 
     try:
-        subprocess.Popen([installer_path] + args)
+        current_pid = os.getpid()
+        installer_ps = installer_path.replace("'", "''")
+        error_log_ps = _get_error_log_path().replace("'", "''")
+
+        if getattr(sys, "frozen", False):
+            relaunch_file = sys.executable
+            relaunch_args = []
+        else:
+            relaunch_file = sys.executable
+            relaunch_args = [os.path.abspath(__file__)]
+
+        relaunch_file_ps = relaunch_file.replace("'", "''")
+        relaunch_args_ps = "@(" + ",".join("'" + arg.replace("'", "''") + "'" for arg in relaunch_args) + ")"
+
+        helper_path = os.path.join(tempfile.gettempdir(), "reca_update_helper.ps1")
+        helper_script = """param([int]$PidToWait,[string]$Installer,[string]$LogPath,[string]$Relaunch,[string[]]$RelaunchArgs)
+Add-Type -AssemblyName System.Windows.Forms
+$ErrorActionPreference = 'Stop'
+try {
+  while (Get-Process -Id $PidToWait -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 250 }
+  $proc = Start-Process -FilePath $Installer -ArgumentList @('/SILENT','/SUPPRESSMSGBOXES','/NORESTART') -Verb RunAs -Wait -PassThru
+  if ($proc.ExitCode -ne 0) {
+    Add-Content -Path $LogPath -Value ("{0} [ERROR] Installer exited with code {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss,fff'), $proc.ExitCode)
+    [System.Windows.Forms.MessageBox]::Show("La actualizacion fallo (codigo $($proc.ExitCode)). Revisa: $LogPath", 'Actualizacion', 'OK', 'Error') | Out-Null
+    exit $proc.ExitCode
+  }
+  Start-Process -FilePath $Relaunch -ArgumentList $RelaunchArgs | Out-Null
+} catch {
+  try { Add-Content -Path $LogPath -Value ("{0} [ERROR] Update helper failed: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss,fff'), $_.Exception.Message) } catch {}
+  [System.Windows.Forms.MessageBox]::Show("Ocurrio un error durante la actualizacion. Revisa: $LogPath", 'Actualizacion', 'OK', 'Error') | Out-Null
+  exit 1
+}
+"""
+        with open(helper_path, "w", encoding="utf-8") as handler:
+            handler.write(helper_script)
+
+        command = (
+            "& '{helper}' -PidToWait {pid} -Installer '{installer}' -LogPath '{log}' "
+            "-Relaunch '{relaunch}' -RelaunchArgs {relaunch_args}"
+        ).format(
+            helper=helper_path.replace("'", "''"),
+            pid=current_pid,
+            installer=installer_ps,
+            log=error_log_ps,
+            relaunch=relaunch_file_ps,
+            relaunch_args=relaunch_args_ps,
+        )
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", command],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
         return True
     except Exception:
-        LOG.exception("Failed to launch installer")
+        LOG.exception("Failed to launch installer helper")
         return False
 
 
@@ -1727,7 +1746,7 @@ class AppMenu:
             messagebox.showinfo("Actualización", "Ya tienes la última versión instalada.")
             return
         if check_for_updates():
-            self.root.after(200, self.root.destroy)
+            self.root.destroy()
 
     def _crear_boton_modulo(self, parent, texto, comando):
         tk.Button(
