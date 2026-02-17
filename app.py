@@ -13,6 +13,7 @@ import sys
 
 import tempfile
 import ctypes
+import threading
 
 
 
@@ -40,7 +41,7 @@ from supabase import create_client, Client
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.7"
+APP_VERSION = "1.0.9"
 
 GITHUB_OWNER = "auyaban"
 
@@ -62,6 +63,16 @@ def _resource_path(relative_path):
     return os.path.join(base_dir, relative_path)
 
 LOGO_PATH = _resource_path(os.path.join("logo", "logo_reca.png"))
+
+
+def _maximize_window(window):
+    try:
+        window.state("zoomed")
+    except tk.TclError:
+        try:
+            window.attributes("-zoomed", True)
+        except tk.TclError:
+            pass
 
 
 class SplashScreen(tk.Toplevel):
@@ -136,6 +147,7 @@ class SplashScreen(tk.Toplevel):
         self.log_box.pack(fill=tk.BOTH, expand=False)
 
         self._center_window(520, 420)
+        _maximize_window(self)
 
     def _center_window(self, width, height):
         self.update_idletasks()
@@ -359,6 +371,22 @@ def _sha256_file(path):
     return digest.hexdigest()
 
 
+def _get_error_log_path():
+    return os.path.join(_get_log_dir(), "error.log")
+
+
+def _restart_application():
+    try:
+        if getattr(sys, "frozen", False):
+            subprocess.Popen([sys.executable])
+        else:
+            subprocess.Popen([sys.executable, os.path.abspath(__file__)])
+        return True
+    except Exception:
+        LOG.exception("Failed to restart application")
+        return False
+
+
 
 
 def _is_admin():
@@ -452,14 +480,35 @@ def check_for_updates():
             return False
         LOG.info("Update verified for version %s", latest_tag)
         if _run_installer(installer_path):
-            messagebox.showinfo("Actualización", "Se inició la instalación. La aplicación se cerrará.")
+            if _restart_application():
+                messagebox.showinfo(
+                    "Actualización",
+                    "La instalación terminó correctamente. La aplicación se reiniciará.",
+                )
+                return True
+            LOG.error("Update installed but restart failed")
+            messagebox.showerror(
+                "Actualización",
+                "La actualización se instaló, pero no se pudo reiniciar automáticamente.\n"
+                f"Abre la aplicación manualmente. Logs: {_get_error_log_path()}",
+            )
             return True
+        LOG.error("Update installer failed for %s", latest_tag)
+        messagebox.showerror(
+            "Actualización",
+            "No se pudo completar la actualización.\n"
+            f"Revisa los logs en {_get_error_log_path()}",
+        )
         return False
 
     except Exception:
 
         LOG.exception("Auto-update failed")
-
+        messagebox.showerror(
+            "Actualización",
+            "Ocurrió un error al intentar actualizar.\n"
+            f"Revisa los logs en {_get_error_log_path()}",
+        )
         return False
 
 
@@ -495,25 +544,54 @@ class FormularioEmpresa(tk.Toplevel):
     """Ventana modal para crear o editar empresas"""
 
     # Configuracion de campos del formulario
-    CAMPOS_CONFIG = [
-        ("nombre_empresa", "Nombre Empresa *", True),
-        ("nit_empresa", "NIT", False),
-        ("direccion_empresa", "Dirección", False),
-        ("ciudad_empresa", "Ciudad", False),
-        ("correo_1", "Email(s)", False),
-        ("contacto_empresa", "Contacto(s)", False),
-        ("cargo", "Cargo", False),
-        ("telefono_empresa", "Teléfono(s)", False),
-        ("sede_empresa", "Sede", False),
-        ("zona_empresa", "Zona", False),
-        ("responsable_visita", "Responsable Visita", False),
-        ("asesor", "Asesor", False),
-        ("correo_asesor", "Email Asesor", False),
-        ("profesional_asignado", "Profesional Asignado", False),
-        ("correo_profesional", "Email Profesional", False),
-        ("caja_compensacion", "Caja Compensación", False),
-        ("estado", "Estado *", True),
-        ("observaciones", "Observaciones", False),
+    FIELD_CONFIG = {
+        "nombre_empresa": ("Nombre Empresa *", True),
+        "nit_empresa": ("NIT", False),
+        "direccion_empresa": ("Dirección", False),
+        "ciudad_empresa": ("Ciudad", False),
+        "correo_1": ("Email(s)", False),
+        "contacto_empresa": ("Contacto(s)", False),
+        "cargo": ("Cargo", False),
+        "telefono_empresa": ("Teléfono(s)", False),
+        "sede_empresa": ("Sede", False),
+        "zona_empresa": ("Zona", False),
+        "responsable_visita": ("Responsable Visita", False),
+        "asesor": ("Asesor", False),
+        "correo_asesor": ("Email Asesor", False),
+        "profesional_asignado": ("Profesional Asignado", False),
+        "correo_profesional": ("Email Profesional", False),
+        "caja_compensacion": ("Caja Compensación", False),
+        "estado": ("Estado *", True),
+        "observaciones": ("Observaciones", False),
+    }
+
+    SECCIONES = [
+        ("Empresa", [
+            "nombre_empresa",
+            "nit_empresa",
+            "direccion_empresa",
+            "ciudad_empresa",
+            "sede_empresa",
+            "zona_empresa",
+            "responsable_visita",
+            "profesional_asignado",
+            "cargo",
+            "contacto_empresa",
+            "telefono_empresa",
+            "correo_1",
+            "estado",
+        ], "#E6F4EA"),
+        ("Compensar", [
+            "caja_compensacion",
+            "asesor",
+            "correo_asesor",
+        ], "#FFF3E0"),
+        ("RECA", [
+            "correo_profesional",
+        ], "#F3E5F5"),
+        ("Observaciones", [
+            "observaciones",
+        ], "#F7F5FA"),
     ]
 
     ESTADOS_DISPONIBLES = ["Activa", "En Proceso", "Pausada", "Cerrada", "Inactiva"]
@@ -534,12 +612,20 @@ class FormularioEmpresa(tk.Toplevel):
         self.empresa = empresa
         self.resultado = None
         self.campos = {}
+        self._asesores = []
+        self._asesores_correo = {}
+        self._profesionales = []
+        self._profesionales_correo = {}
 
         # Configurar ventana
         titulo = "Editar Empresa" if empresa else "Nueva Empresa"
         self.title(titulo)
         self.geometry("900x700")
         self.resizable(False, False)
+        _maximize_window(self)
+
+        # Cargar catalogos
+        self._cargar_catalogos()
 
         # Crear interfaz
         self.crear_formulario()
@@ -602,13 +688,13 @@ class FormularioEmpresa(tk.Toplevel):
 
         # Crear campos dinámicamente
 
-        self._crear_campos(scrollable_frame)
+        last_row = self._crear_campos(scrollable_frame)
 
 
 
         # Crear botones de acción
 
-        self._crear_botones(scrollable_frame, len(self.CAMPOS_CONFIG) + 1)
+        self._crear_botones(scrollable_frame, last_row + 1)
 
 
 
@@ -624,9 +710,7 @@ class FormularioEmpresa(tk.Toplevel):
 
         """
 
-        Crea todos los campos del formulario
-
-
+        Crea todos los campos del formulario agrupados por secciones.
 
         Args:
 
@@ -634,45 +718,58 @@ class FormularioEmpresa(tk.Toplevel):
 
         """
 
-        for row, (campo, label, required) in enumerate(self.CAMPOS_CONFIG, start=1):
-
-            # Label del campo
-
-            tk.Label(
-
+        row = 1
+        for titulo, campos, bg in self.SECCIONES:
+            title_label = tk.Label(
                 parent,
+                text=titulo,
+                bg=bg,
+                fg=COLOR_PURPLE,
+                font=("Arial", 10, "bold"),
+            )
+            frame = tk.LabelFrame(
+                parent,
+                labelwidget=title_label,
+                bg=bg,
+                padx=12,
+                pady=8,
+                bd=1,
+            )
+            frame.grid(row=row, column=0, columnspan=4, sticky="ew", padx=12, pady=8)
+            frame.grid_columnconfigure(1, weight=1)
+            row += 1
 
-                text=label,
+            inner_row = 0
+            for campo in campos:
+                label_text, _required = self.FIELD_CONFIG.get(campo, (campo, False))
+                tk.Label(
+                    frame,
+                    text=label_text,
+                    font=("Arial", 10, "bold"),
+                    bg=bg,
+                ).grid(row=inner_row, column=0, sticky="w", padx=6, pady=4)
 
-                font=("Arial", 10, "bold")
+                if campo == "estado":
+                    widget = self._crear_campo_estado(frame)
+                elif campo == "caja_compensacion":
+                    widget = self._crear_campo_caja_compensacion(frame)
+                elif campo == "asesor":
+                    widget = self._crear_campo_asesor(frame)
+                elif campo == "profesional_asignado":
+                    widget = self._crear_campo_profesional(frame)
+                elif campo == "observaciones":
+                    widget = self._crear_campo_observaciones(frame)
+                else:
+                    widget = self._crear_campo_texto(frame, campo)
 
-            ).grid(row=row, column=0, sticky="w", padx=10, pady=5)
+                self.campos[campo] = widget
+                if campo == "observaciones":
+                    widget.grid(row=inner_row, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+                else:
+                    widget.grid(row=inner_row, column=1, columnspan=3, sticky="w", padx=6, pady=4)
+                inner_row += 1
 
-
-
-            # Widget según tipo de campo
-
-            if campo == "estado":
-
-                widget = self._crear_campo_estado(parent)
-
-            elif campo == "caja_compensacion":
-
-                widget = self._crear_campo_caja_compensacion(parent)
-
-            elif campo == "observaciones":
-
-                widget = self._crear_campo_observaciones(parent)
-
-            else:
-
-                widget = self._crear_campo_texto(parent, campo)
-
-
-
-            self.campos[campo] = widget
-
-            widget.grid(row=row, column=1, columnspan=3, sticky="w", padx=10, pady=5)
+        return row
 
 
 
@@ -762,6 +859,39 @@ class FormularioEmpresa(tk.Toplevel):
 
         return widget
 
+    def _crear_campo_asesor(self, parent):
+        """Crea combobox para el campo asesor"""
+        widget = ttk.Combobox(
+            parent,
+            values=self._asesores,
+            state="readonly",
+            width=40,
+            font=("Arial", 10)
+        )
+        if self.empresa:
+            valor = self.empresa.get("asesor", "") or ""
+            widget.set(valor)
+            self._actualizar_correo_asesor(valor)
+        widget.bind("<<ComboboxSelected>>", lambda e: self._actualizar_correo_asesor(widget.get()))
+        return widget
+
+    def _crear_campo_profesional(self, parent):
+        """Crea combobox para el campo profesional asignado"""
+        widget = ttk.Combobox(
+            parent,
+            values=self._profesionales,
+            state="normal",
+            width=40,
+            font=("Arial", 10)
+        )
+        if self.empresa:
+            valor = self.empresa.get("profesional_asignado", "") or ""
+            widget.set(valor)
+            self._actualizar_correo_profesional(valor)
+        widget.bind("<<ComboboxSelected>>", lambda e: self._actualizar_correo_profesional(widget.get()))
+        widget.bind("<FocusOut>", lambda e: self._actualizar_correo_profesional(widget.get()))
+        return widget
+
 
     def _crear_campo_texto(self, parent, campo):
 
@@ -779,9 +909,116 @@ class FormularioEmpresa(tk.Toplevel):
 
             widget.insert(0, valor)
 
+        if campo == "correo_asesor" and not widget.get():
+            asesor_widget = self.campos.get("asesor")
+            if asesor_widget:
+                self._actualizar_correo_asesor(asesor_widget.get())
+
+        if campo == "correo_profesional" and not widget.get():
+            profesional_widget = self.campos.get("profesional_asignado")
+            if profesional_widget:
+                self._actualizar_correo_profesional(profesional_widget.get())
+
 
 
         return widget
+
+    def _actualizar_correo_asesor(self, nombre):
+        correo = self._asesores_correo.get(nombre, "")
+        widget = self.campos.get("correo_asesor")
+        if widget:
+            widget.delete(0, tk.END)
+            widget.insert(0, correo)
+
+    def _actualizar_correo_profesional(self, nombre):
+        correo = self._profesionales_correo.get((nombre or "").strip(), "")
+        widget = self.campos.get("correo_profesional")
+        if widget and correo:
+            widget.delete(0, tk.END)
+            widget.insert(0, correo)
+
+    def _asegurar_profesional(self, nombre, correo):
+        nombre = (nombre or "").strip()
+        correo = (correo or "").strip()
+        if not nombre:
+            return correo
+        try:
+            response = (self.supabase.table("profesionales")
+                        .select("nombre_profesional, correo_profesional")
+                        .eq("nombre_profesional", nombre)
+                        .limit(1)
+                        .execute())
+            existente = (response.data or [])
+            if existente:
+                correo_existente = (existente[0].get("correo_profesional") or "").strip()
+                final_correo = correo_existente or correo
+                if correo and correo != correo_existente:
+                    (self.supabase.table("profesionales")
+                        .update({"correo_profesional": correo})
+                        .eq("nombre_profesional", nombre)
+                        .execute())
+                    final_correo = correo
+                self._profesionales_correo[nombre] = final_correo
+                if nombre not in self._profesionales:
+                    self._profesionales.append(nombre)
+                    self._profesionales.sort()
+                return final_correo
+
+            payload = {"nombre_profesional": nombre}
+            if correo:
+                payload["correo_profesional"] = correo
+            self.supabase.table("profesionales").insert(payload).execute()
+            self._profesionales_correo[nombre] = correo
+            if nombre not in self._profesionales:
+                self._profesionales.append(nombre)
+                self._profesionales.sort()
+            return correo
+        except Exception:
+            LOG.exception("Error sincronizando profesional: %s", nombre)
+            raise
+
+    def _cargar_catalogos(self):
+        if not self.supabase:
+            return
+        try:
+            asesores = (self.supabase.table("asesores")
+                        .select("nombre, email")
+                        .order("nombre", desc=False)
+                        .execute()).data or []
+            nombres_asesores = []
+            seen = set()
+            for row in asesores:
+                nombre = (row.get("nombre") or "").strip()
+                if nombre and nombre not in seen:
+                    seen.add(nombre)
+                    nombres_asesores.append(nombre)
+            self._asesores = nombres_asesores
+            self._asesores_correo = {
+                row.get("nombre", "").strip(): (row.get("email", "") or "").strip()
+                for row in asesores if row.get("nombre")
+            }
+        except Exception:
+            LOG.exception("Error cargando asesores")
+
+        try:
+            profesionales = (self.supabase.table("profesionales")
+                             .select("nombre_profesional, correo_profesional")
+                             .order("nombre_profesional", desc=False)
+                             .execute()).data or []
+            nombres_profesionales = []
+            seen = set()
+            for row in profesionales:
+                nombre = (row.get("nombre_profesional") or "").strip()
+                if nombre and nombre not in seen:
+                    seen.add(nombre)
+                    nombres_profesionales.append(nombre)
+            self._profesionales = nombres_profesionales
+            self._profesionales_correo = {
+                row.get("nombre_profesional", "").strip(): (row.get("correo_profesional", "") or "").strip()
+                for row in profesionales if row.get("nombre_profesional")
+            }
+        except Exception:
+            LOG.exception("Error cargando profesionales")
 
 
 
@@ -933,6 +1170,15 @@ class FormularioEmpresa(tk.Toplevel):
 
             return
 
+        # Sincronizar profesional asignado con tabla 'profesionales'
+        profesional_nombre = (datos.get("profesional_asignado") or "").strip()
+        profesional_correo = (datos.get("correo_profesional") or "").strip()
+        if profesional_nombre:
+            datos["correo_profesional"] = self._asegurar_profesional(
+                profesional_nombre,
+                profesional_correo,
+            )
+
 
 
         try:
@@ -1020,6 +1266,623 @@ class FormularioEmpresa(tk.Toplevel):
 
 
 
+# ============================================
+# FORMULARIOS GENERICOS
+# ============================================
+
+
+class FormularioEntidad(tk.Toplevel):
+    """Ventana modal para crear o editar registros genericos"""
+
+    def __init__(self, parent, supabase, tabla, campos, key_field, registro=None, titulo="Registro"):
+        super().__init__(parent)
+        self.parent = parent
+        self.supabase = supabase
+        self.tabla = tabla
+        self.campos_config = campos
+        self.key_field = key_field
+        self.registro = registro
+        self.resultado = None
+        self.widgets = {}
+        self._original_key = registro.get(key_field) if registro else None
+
+        self.title(titulo)
+        self.geometry("700x600")
+        self.resizable(False, False)
+        _maximize_window(self)
+
+        self._crear_formulario()
+
+        self.transient(parent)
+        self.grab_set()
+
+    def _crear_formulario(self):
+        container = tk.Frame(self)
+        container.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
+
+        row = 0
+        for campo, label, required, widget_type in self.campos_config:
+            tk.Label(
+                container,
+                text=label,
+                font=("Arial", 10, "bold"),
+            ).grid(row=row, column=0, sticky="w", padx=6, pady=4)
+
+            if widget_type == "text":
+                widget = scrolledtext.ScrolledText(container, width=50, height=4, font=("Arial", 10))
+                if self.registro:
+                    valor = self.registro.get(campo, "") or ""
+                    widget.insert("1.0", valor)
+                widget.grid(row=row, column=1, sticky="ew", padx=6, pady=4)
+            else:
+                widget = tk.Entry(container, width=50, font=("Arial", 10))
+                if self.registro:
+                    valor = self.registro.get(campo, "") or ""
+                    widget.insert(0, valor)
+                widget.grid(row=row, column=1, sticky="w", padx=6, pady=4)
+
+            self.widgets[campo] = widget
+            row += 1
+
+        btn_frame = tk.Frame(container)
+        btn_frame.grid(row=row, column=0, columnspan=2, pady=16)
+
+        if self.registro:
+            tk.Button(
+                btn_frame,
+                text="Guardar Cambios",
+                command=self.guardar,
+                bg="#28a745",
+                fg="white",
+                font=("Arial", 12, "bold"),
+                padx=20,
+                pady=8,
+            ).pack(side=tk.LEFT, padx=6)
+            tk.Button(
+                btn_frame,
+                text="Eliminar",
+                command=self.eliminar,
+                bg="#dc3545",
+                fg="white",
+                font=("Arial", 12),
+                padx=20,
+                pady=8,
+            ).pack(side=tk.LEFT, padx=6)
+        else:
+            tk.Button(
+                btn_frame,
+                text="Crear",
+                command=self.guardar,
+                bg="#28a745",
+                fg="white",
+                font=("Arial", 12, "bold"),
+                padx=20,
+                pady=8,
+            ).pack(side=tk.LEFT, padx=6)
+
+        tk.Button(
+            btn_frame,
+            text="Cancelar",
+            command=self.destroy,
+            font=("Arial", 12),
+            padx=20,
+            pady=8,
+        ).pack(side=tk.LEFT, padx=6)
+
+        container.grid_columnconfigure(1, weight=1)
+
+    def guardar(self):
+        datos = {}
+        for campo, label, required, widget_type in self.campos_config:
+            if widget_type == "text":
+                valor = self.widgets[campo].get("1.0", tk.END).strip()
+            else:
+                valor = self.widgets[campo].get().strip()
+            if required and not valor:
+                messagebox.showerror("Error", f"El campo '{label}' es obligatorio")
+                return
+            datos[campo] = valor
+
+        try:
+            if self.registro:
+                self.supabase.table(self.tabla).update(datos).eq(self.key_field, self._original_key).execute()
+                messagebox.showinfo("Éxito", "Registro actualizado correctamente")
+            else:
+                self.supabase.table(self.tabla).insert(datos).execute()
+                messagebox.showinfo("Éxito", "Registro creado correctamente")
+            self.resultado = "guardado"
+            self.destroy()
+        except Exception as e:
+            LOG.exception("Error guardando registro en %s", self.tabla)
+            messagebox.showerror("Error", f"Error guardando registro: {e}")
+
+    def eliminar(self):
+        if not self.registro:
+            return
+        confirmar = messagebox.askyesno("Confirmar eliminación", "¿Eliminar este registro?")
+        if not confirmar:
+            return
+        try:
+            self.supabase.table(self.tabla).delete().eq(self.key_field, self._original_key).execute()
+            messagebox.showinfo("Éxito", "Registro eliminado correctamente")
+            self.resultado = "eliminado"
+            self.destroy()
+        except Exception as e:
+            LOG.exception("Error eliminando registro en %s", self.tabla)
+            messagebox.showerror("Error", f"Error eliminando registro: {e}")
+
+
+# ============================================
+# APPS GENERICAS
+# ============================================
+
+
+class AppEntidad:
+    """Aplicacion generica para gestionar tablas simples"""
+
+    def __init__(self, root, table, columns, labels, widths, form_config, key_field, title, order_by):
+        self.root = root
+        self.root.title(title)
+        self.root.geometry("1200x720")
+        _maximize_window(self.root)
+
+        self.table = table
+        self.columns = columns
+        self.labels = labels
+        self.widths = widths
+        self.form_config = form_config
+        self.key_field = key_field
+        self.order_by = order_by
+
+        self.supabase = conectar_supabase()
+        self.registros = []
+        self._registro_por_key = {}
+        self.registro_seleccionado = None
+
+        self._crear_interfaz()
+        self.cargar_registros()
+
+    def _crear_interfaz(self):
+        header = tk.Frame(self.root, bg=COLOR_PURPLE, height=80)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        tk.Label(
+            header,
+            text=self.root.title(),
+            font=("Arial", 20, "bold"),
+            bg=COLOR_PURPLE,
+            fg="white",
+        ).pack(side=tk.LEFT, padx=16)
+
+        tabla_frame = tk.Frame(self.root)
+        tabla_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        self.contador_label = tk.Label(
+            tabla_frame,
+            text="Resultados: 0 registros",
+            font=("Arial", 11, "bold")
+        )
+        self.contador_label.grid(row=0, column=0, sticky="w", pady=5)
+
+        self.tree = ttk.Treeview(
+            tabla_frame,
+            columns=self.columns,
+            show="headings",
+            height=18
+        )
+        for col in self.columns:
+            self.tree.heading(col, text=self.labels.get(col, col))
+            self.tree.column(col, width=self.widths.get(col, 120))
+        scroll_y = ttk.Scrollbar(tabla_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscroll=scroll_y.set)
+        self.tree.grid(row=1, column=0, sticky="nsew")
+        scroll_y.grid(row=1, column=1, sticky="ns")
+        tabla_frame.grid_rowconfigure(1, weight=1)
+        tabla_frame.grid_columnconfigure(0, weight=1)
+
+        self.tree.bind("<ButtonRelease-1>", self._seleccionar)
+        self.tree.bind("<Double-1>", self._abrir_editar)
+
+        btn_frame = tk.Frame(self.root, bg=COLOR_LIGHT_BG)
+        btn_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        tk.Button(
+            btn_frame,
+            text="Nuevo",
+            command=self.nuevo_registro,
+            font=("Arial", 12, "bold"),
+            bg=COLOR_TEAL,
+            fg="white",
+            padx=15,
+            pady=8,
+        ).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(
+            btn_frame,
+            text="Editar",
+            command=self.editar_registro,
+            font=("Arial", 12, "bold"),
+            bg=COLOR_PURPLE,
+            fg="white",
+            padx=15,
+            pady=8,
+        ).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(
+            btn_frame,
+            text="Eliminar",
+            command=self.eliminar_registro,
+            font=("Arial", 12, "bold"),
+            bg="#dc3545",
+            fg="white",
+            padx=15,
+            pady=8,
+        ).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(
+            btn_frame,
+            text="Refrescar",
+            command=self.cargar_registros,
+            font=("Arial", 12, "bold"),
+            bg=COLOR_TEAL,
+            fg="white",
+            padx=15,
+            pady=8,
+        ).pack(side=tk.LEFT, padx=5)
+
+    def cargar_registros(self):
+        if not self.supabase:
+            return
+        try:
+            query = self.supabase.table(self.table).select("*")
+            if self.order_by:
+                query = query.order(self.order_by, desc=False)
+            data = query.execute().data or []
+            self.registros = data
+            self._registro_por_key = {}
+            self._limpiar_tabla()
+            self._mostrar_registros(data)
+            self.contador_label.config(text=f"Resultados: {len(data)} registros")
+        except Exception as e:
+            LOG.exception("Error cargando registros de %s", self.table)
+            messagebox.showerror("Error", f"Error cargando registros: {e}")
+
+    def _limpiar_tabla(self):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+    def _mostrar_registros(self, registros):
+        for registro in registros:
+            key_value = registro.get(self.key_field)
+            key_str = str(key_value) if key_value is not None else ""
+            if key_str:
+                self._registro_por_key[key_str] = registro
+            values = [registro.get(col, "") for col in self.columns]
+            self.tree.insert("", tk.END, values=values, tags=(key_str,) if key_str else ())
+
+    def _seleccionar(self, event):
+        selection = self.tree.selection()
+        if selection:
+            item = self.tree.item(selection[0])
+            registro_key = item["tags"][0] if item["tags"] else None
+            if registro_key is not None:
+                registro_key = str(registro_key)
+            self.registro_seleccionado = self._registro_por_key.get(registro_key)
+
+    def _abrir_editar(self, event=None):
+        if not self.registro_seleccionado:
+            messagebox.showwarning("Aviso", "Selecciona un registro primero")
+            return
+        ventana = FormularioEntidad(
+            self.root,
+            self.supabase,
+            self.table,
+            self.form_config,
+            self.key_field,
+            registro=self.registro_seleccionado,
+            titulo=f"Editar {self.table}",
+        )
+        self.root.wait_window(ventana)
+        if ventana.resultado:
+            self.cargar_registros()
+
+    def nuevo_registro(self):
+        if not self.supabase:
+            return
+        ventana = FormularioEntidad(
+            self.root,
+            self.supabase,
+            self.table,
+            self.form_config,
+            self.key_field,
+            registro=None,
+            titulo=f"Nuevo {self.table}",
+        )
+        self.root.wait_window(ventana)
+        if ventana.resultado:
+            self.cargar_registros()
+
+    def editar_registro(self):
+        if not self.registro_seleccionado:
+            messagebox.showwarning("Aviso", "Selecciona un registro primero")
+            return
+        self._abrir_editar()
+
+    def eliminar_registro(self):
+        if not self.registro_seleccionado:
+            messagebox.showwarning("Aviso", "Selecciona un registro primero")
+            return
+        confirmar = messagebox.askyesno("Confirmar", "¿Eliminar el registro seleccionado?")
+        if not confirmar:
+            return
+        try:
+            self.supabase.table(self.table).delete().eq(
+                self.key_field, self.registro_seleccionado.get(self.key_field)
+            ).execute()
+            messagebox.showinfo("Éxito", "Registro eliminado")
+            self.cargar_registros()
+        except Exception as e:
+            LOG.exception("Error eliminando registro en %s", self.table)
+            messagebox.showerror("Error", f"Error eliminando registro: {e}")
+
+
+class AppMenu:
+    """Pantalla principal de opciones"""
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title("RECA - Panel principal")
+        self.root.geometry("1000x700")
+        _maximize_window(self.root)
+        self._latest_version = None
+
+        self._crear_interfaz()
+        self._fetch_latest_version_async()
+
+    def _crear_interfaz(self):
+        header = tk.Frame(self.root, bg=COLOR_PURPLE, height=90)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+
+        tk.Label(
+            header,
+            text="RECA - Panel principal",
+            font=("Arial", 24, "bold"),
+            bg=COLOR_PURPLE,
+            fg="white",
+        ).pack(side=tk.LEFT, padx=20)
+
+        body = tk.Frame(self.root, bg=COLOR_LIGHT_BG)
+        body.pack(fill=tk.BOTH, expand=True, padx=40, pady=40)
+
+        tk.Label(
+            body,
+            text="Selecciona un modulo",
+            font=("Arial", 18, "bold"),
+            bg=COLOR_LIGHT_BG,
+            fg=COLOR_PURPLE,
+        ).pack(pady=20)
+
+        btn_frame = tk.Frame(body, bg=COLOR_LIGHT_BG)
+        btn_frame.pack(pady=20)
+
+        self._crear_boton_modulo(btn_frame, "Empresas", self._abrir_empresas)
+        self._crear_boton_modulo(btn_frame, "Asesores", self._abrir_asesores)
+        self._crear_boton_modulo(btn_frame, "Gestores", self._abrir_gestores)
+        self._crear_boton_modulo(btn_frame, "Profesionales", self._abrir_profesionales)
+        self._crear_boton_modulo(btn_frame, "Interpretes", self._abrir_interpretes)
+        self._crear_footer()
+
+    def _crear_footer(self):
+        footer = tk.Frame(self.root, bg=COLOR_LIGHT_BG, height=48)
+        footer.pack(fill=tk.X, side=tk.BOTTOM)
+        footer.pack_propagate(False)
+
+        info_wrap = tk.Frame(footer, bg=COLOR_LIGHT_BG)
+        info_wrap.pack(side=tk.LEFT, anchor="sw", padx=8, pady=4)
+
+        self.version_label = tk.Label(
+            info_wrap,
+            text=f"Version: {APP_VERSION} | GitHub: --",
+            font=("Arial", 8),
+            bg=COLOR_LIGHT_BG,
+            fg="#666666",
+            justify="left",
+            anchor="w",
+        )
+        self.version_label.pack(anchor="w")
+
+        self.update_btn = tk.Button(
+            info_wrap,
+            text="Actualizar app",
+            command=self._manual_update,
+            font=("Arial", 8, "bold"),
+            bg=COLOR_TEAL,
+            fg="white",
+            padx=8,
+            pady=2,
+        )
+        self.update_btn.pack(anchor="w", pady=(2, 0))
+
+    def _fetch_latest_version_async(self):
+        def worker():
+            latest = None
+            try:
+                release = _get_latest_release()
+                if release:
+                    latest = release.get("tag_name", "") or None
+            except Exception:
+                LOG.exception("Error fetching latest release for menu footer")
+            self.root.after(0, lambda: self._update_version_label(latest))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _update_version_label(self, latest):
+        self._latest_version = latest
+        latest_text = latest if latest else "--"
+        if self.version_label.winfo_exists():
+            self.version_label.config(text=f"Version: {APP_VERSION} | GitHub: {latest_text}")
+
+    def _manual_update(self):
+        latest = self._latest_version
+        if not latest:
+            try:
+                release = _get_latest_release()
+                latest = release.get("tag_name", "") if release else ""
+                self._update_version_label(latest or None)
+            except Exception:
+                latest = ""
+        if not _is_newer_version(latest or ""):
+            messagebox.showinfo("Actualización", "Ya tienes la última versión instalada.")
+            return
+        if check_for_updates():
+            self.root.after(200, self.root.destroy)
+
+    def _crear_boton_modulo(self, parent, texto, comando):
+        tk.Button(
+            parent,
+            text=texto,
+            command=comando,
+            font=("Arial", 14, "bold"),
+            bg=COLOR_TEAL,
+            fg="white",
+            padx=30,
+            pady=12,
+            width=16,
+        ).pack(pady=10)
+
+    def _crear_ventana(self, titulo):
+        ventana = tk.Toplevel(self.root)
+        ventana.title(titulo)
+        if os.path.exists(LOGO_PATH):
+            try:
+                icon = tk.PhotoImage(file=LOGO_PATH)
+                ventana.iconphoto(True, icon)
+                ventana._window_icon = icon
+            except Exception:
+                pass
+        return ventana
+
+    def _abrir_empresas(self):
+        ventana = self._crear_ventana("RECA - Empresas")
+        AppRECA(ventana)
+
+    def _abrir_asesores(self):
+        ventana = self._crear_ventana("RECA - Asesores")
+        AppEntidad(
+            ventana,
+            table="asesores",
+            columns=("nombre", "email", "telefono", "sede", "gestor"),
+            labels={
+                "nombre": "Nombre",
+                "email": "Email",
+                "telefono": "Teléfono",
+                "sede": "Sede",
+                "gestor": "Gestor",
+            },
+            widths={
+                "nombre": 220,
+                "email": 220,
+                "telefono": 120,
+                "sede": 120,
+                "gestor": 180,
+            },
+            form_config=[
+                ("nombre", "Nombre *", True, "entry"),
+                ("email", "Email", False, "entry"),
+                ("telefono", "Teléfono", False, "entry"),
+                ("sede", "Sede", False, "entry"),
+                ("gestor", "Gestor", False, "entry"),
+            ],
+            key_field="nombre",
+            title="RECA - Asesores",
+            order_by="nombre",
+        )
+
+    def _abrir_gestores(self):
+        ventana = self._crear_ventana("RECA - Gestores")
+        AppEntidad(
+            ventana,
+            table="gestores",
+            columns=("nombre", "email", "telefono", "sede", "localidades"),
+            labels={
+                "nombre": "Nombre",
+                "email": "Email",
+                "telefono": "Teléfono",
+                "sede": "Sede",
+                "localidades": "Localidades",
+            },
+            widths={
+                "nombre": 220,
+                "email": 220,
+                "telefono": 120,
+                "sede": 120,
+                "localidades": 300,
+            },
+            form_config=[
+                ("nombre", "Nombre *", True, "entry"),
+                ("email", "Email", False, "entry"),
+                ("telefono", "Teléfono", False, "entry"),
+                ("sede", "Sede", False, "entry"),
+                ("localidades", "Localidades", False, "text"),
+            ],
+            key_field="nombre",
+            title="RECA - Gestores",
+            order_by="nombre",
+        )
+
+    def _abrir_profesionales(self):
+        ventana = self._crear_ventana("RECA - Profesionales")
+        AppEntidad(
+            ventana,
+            table="profesionales",
+            columns=("nombre_profesional", "correo_profesional", "programa", "antiguedad", "usuario_login"),
+            labels={
+                "nombre_profesional": "Nombre",
+                "correo_profesional": "Email",
+                "programa": "Programa",
+                "antiguedad": "Antigüedad",
+                "usuario_login": "Usuario Login",
+            },
+            widths={
+                "nombre_profesional": 220,
+                "correo_profesional": 220,
+                "programa": 160,
+                "antiguedad": 120,
+                "usuario_login": 140,
+            },
+            form_config=[
+                ("nombre_profesional", "Nombre *", True, "entry"),
+                ("correo_profesional", "Email", False, "entry"),
+                ("programa", "Programa", False, "entry"),
+                ("antiguedad", "Antigüedad", False, "entry"),
+                ("usuario_login", "Usuario Login", False, "entry"),
+            ],
+            key_field="id",
+            title="RECA - Profesionales",
+            order_by="nombre_profesional",
+        )
+
+    def _abrir_interpretes(self):
+        ventana = self._crear_ventana("RECA - Interpretes")
+        AppEntidad(
+            ventana,
+            table="interpretes",
+            columns=("nombre",),
+            labels={
+                "nombre": "Nombre",
+            },
+            widths={
+                "nombre": 300,
+            },
+            form_config=[
+                ("nombre", "Nombre *", True, "entry"),
+            ],
+            key_field="nombre",
+            title="RECA - Interpretes",
+            order_by="nombre",
+        )
+
 
 
 # ============================================
@@ -1105,6 +1968,7 @@ class AppRECA:
         self.root = root
         self.root.title("RECA - Gestion de Empresas")
         self.root.geometry("1400x750")
+        _maximize_window(self.root)
 
         if os.path.exists(LOGO_PATH):
             try:
@@ -1142,6 +2006,7 @@ class AppRECA:
         self._filtros_visible = False
         self._filtros_loaded = False
         self._filtros_loading = False
+        self._latest_version = None
 
         # Crear interfaz y cargar datos
         self._report_progress("Construyendo interfaz...", 35)
@@ -1193,6 +2058,14 @@ class AppRECA:
         # Botones de acción
 
         self._crear_botones_accion()
+
+        # Footer
+
+        self._crear_footer()
+
+        # Cargar version publicada (en background)
+
+        self._fetch_latest_version_async()
 
 
 
@@ -1306,6 +2179,38 @@ class AppRECA:
             padx=10,
             pady=5,
         ).pack(side=tk.LEFT, padx=5)
+
+    def _crear_footer(self):
+        footer = tk.Frame(self.root, bg=COLOR_LIGHT_BG, height=24)
+        footer.pack(fill=tk.X, side=tk.BOTTOM)
+        footer.pack_propagate(False)
+        self.version_label = tk.Label(
+            footer,
+            text=f"Version: {APP_VERSION} | GitHub: --",
+            font=("Arial", 8),
+            bg=COLOR_LIGHT_BG,
+            fg="#666666",
+        )
+        self.version_label.pack(side=tk.LEFT, padx=8)
+
+    def _fetch_latest_version_async(self):
+        def worker():
+            latest = None
+            try:
+                release = _get_latest_release()
+                if release:
+                    latest = release.get("tag_name", "") or None
+            except Exception:
+                LOG.exception("Error fetching latest release for footer")
+            self.root.after(0, lambda: self._update_version_label(latest))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _update_version_label(self, latest):
+        self._latest_version = latest
+        latest_text = latest if latest else "--"
+        if self.version_label.winfo_exists():
+            self.version_label.config(text=f"Version: {APP_VERSION} | GitHub: {latest_text}")
 
     def _crear_filtros(self):
         self.filtros_frame = tk.Frame(self.root, bg=COLOR_LIGHT_BG)
@@ -1905,13 +2810,9 @@ if __name__ == "__main__":
     splash.set_status("Preparando...", 5)
 
     def start_app():
-        splash.set_status("Buscando actualizaciones...", 10)
+        splash.set_status("Iniciando...", 10)
         root.update_idletasks()
         root.update()
-        if check_for_updates():
-            splash.close()
-            root.destroy()
-            sys.exit(0)
 
         if not _ensure_credentials():
             messagebox.showerror("Error", "Credenciales no configuradas (.env)")
@@ -1924,7 +2825,8 @@ if __name__ == "__main__":
             root.deiconify()
 
         splash.set_status("Iniciando aplicacion...", 20)
-        AppRECA(root, progress_callback=splash.set_status, on_ready=on_ready)
+        AppMenu(root)
+        on_ready()
 
     root.after(50, start_app)
     root.mainloop()
