@@ -1,0 +1,25 @@
+Plantilla para cargar nuevas empresas
+
+Archivo:
+- Usa TEMPLATE_NUEVAS_EMPRESAS.csv
+
+Reglas:
+- Una empresa por fila.
+- No cambies el orden de las columnas.
+- NIT: usa solo numero o numero-guion (ejemplo: 900822643-8).
+- CAJA DE COMPENSACION: usa "Compensar" o "No Compensar".
+- ESTADO: sugerido "Activa" (o el estado que corresponda).
+- Si no tienes un dato, dejalo vacio.
+
+Campos recomendados minimos:
+- NOMBRE
+- NIT
+- DIRECCION
+- CONTACTO
+- CORREO 1
+- RESPONSABLE DE LA VISITA
+- CAJA DE COMPENSACION
+
+Notas:
+- Se valida duplicado por combinacion NIT + NOMBRE.
+- Si el mismo NIT tiene nombres de empresa distintos, ambos pueden existir.

@@ -23,6 +23,8 @@ Thumbs.db
 build/
 dist/
 installer/
+backups/
+installer.7z
 *.spec
 RECA Empresas/
 

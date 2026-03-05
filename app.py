@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 import hashlib
+import base64
 import logging
 
 import logging.handlers
 
 import os
 import re
+import unicodedata
 
 import subprocess
 
@@ -14,18 +16,20 @@ import sys
 import tempfile
 import ctypes
 import threading
+import secrets
 
 
 
 import tkinter as tk
 
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, filedialog, simpledialog
 
 
 
 import requests
 
 from dotenv import load_dotenv
+from openpyxl import load_workbook
 
 from supabase import create_client, Client
 
@@ -41,7 +45,7 @@ from supabase import create_client, Client
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.11"
+APP_VERSION = "1.0.12"
 
 GITHUB_OWNER = "auyaban"
 
@@ -55,6 +59,9 @@ COLOR_TEAL = "#07B499"
 COLOR_LIGHT_BG = "#F7F5FA"
 
 REQUEST_HEADERS = {"User-Agent": f"{APP_NAME}/{APP_VERSION}"}
+
+DEFAULT_SUPABASE_AUTH_EMAIL = "test@reca.local"
+DEFAULT_SUPABASE_AUTH_PASSWORD = "Reca.Test.2026!"
 
 
 
@@ -276,14 +283,99 @@ _load_credentials()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
+SUPABASE_AUTH_EMAIL = (os.getenv("SUPABASE_AUTH_EMAIL") or DEFAULT_SUPABASE_AUTH_EMAIL).strip()
+SUPABASE_AUTH_PASSWORD = (os.getenv("SUPABASE_AUTH_PASSWORD") or DEFAULT_SUPABASE_AUTH_PASSWORD).strip()
 
 
 def _ensure_credentials():
-    if not SUPABASE_URL or not SUPABASE_KEY:
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
         LOG.error("Missing Supabase credentials")
         return False
+    if not SUPABASE_AUTH_EMAIL or not SUPABASE_AUTH_PASSWORD:
+        LOG.error("Missing Supabase auth credentials")
+        return False
     return True
+
+
+def _ensure_authenticated(client: Client):
+    try:
+        session = client.auth.get_session()
+        if session and getattr(session, "access_token", None):
+            return True
+
+        response = client.auth.sign_in_with_password(
+            {
+                "email": SUPABASE_AUTH_EMAIL,
+                "password": SUPABASE_AUTH_PASSWORD,
+            }
+        )
+        session = response.session or client.auth.get_session()
+        if not session or not getattr(session, "access_token", None):
+            LOG.error("Supabase auth failed: missing access token for %s", SUPABASE_AUTH_EMAIL)
+            return False
+
+        LOG.info("Supabase autologin successful for %s", SUPABASE_AUTH_EMAIL)
+        return True
+    except Exception:
+        LOG.exception("Supabase autologin failed for %s", SUPABASE_AUTH_EMAIL)
+        return False
+
+
+def _strip_invisible_chars(text):
+    if text is None:
+        return None
+    return "".join(
+        ch for ch in text
+        if unicodedata.category(ch) not in ("Cf", "Cc") or ch in ("\n", "\t", "\r")
+    )
+
+
+def _clean_text(value):
+    if value is None:
+        return None
+    if isinstance(value, float) and value.is_integer():
+        text = str(int(value))
+    else:
+        text = str(value)
+    text = _strip_invisible_chars(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text if text else None
+
+
+def _normalize_nit(value):
+    text = _clean_text(value)
+    if not text:
+        return ""
+    text = text.replace(" ", "")
+    if re.fullmatch(r"\d+\.0+", text):
+        text = text.split(".", 1)[0]
+    return text.lower()
+
+
+def _normalize_name(value):
+    text = _clean_text(value)
+    return text.lower() if text else ""
+
+
+def _header_key(value):
+    text = _clean_text(value) or ""
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _generate_temp_password(length=12):
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%*"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _make_django_pbkdf2_sha256(password, iterations=260000):
+    # Django-compatible hash string for projects that validate against usuario_pass_hash.
+    salt = secrets.token_urlsafe(12).replace("$", "").replace("=", "")
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations)
+    encoded = base64.b64encode(digest).decode("ascii").strip()
+    return f"pbkdf2_sha256${iterations}${salt}${encoded}"
 
 
 
@@ -536,7 +628,15 @@ def conectar_supabase():
         messagebox.showerror("Error", "Credenciales no configuradas")
         return None
     try:
-        return create_client(SUPABASE_URL, SUPABASE_KEY)
+        client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        if not _ensure_authenticated(client):
+            messagebox.showerror(
+                "Error",
+                "No se pudo iniciar sesion automatica en Supabase.\n"
+                f"Revisa los logs en {_get_error_log_path()}",
+            )
+            return None
+        return client
     except Exception as e:
         LOG.exception("Error conectando a Supabase")
         messagebox.showerror("Error", f"Error conectando: {e}")
@@ -1540,6 +1640,87 @@ class AppEntidad:
             pady=8,
         ).pack(side=tk.LEFT, padx=5)
 
+        if self.table == "profesionales":
+            tk.Button(
+                btn_frame,
+                text="Restablecer contraseña",
+                command=self.restablecer_contrasena_profesional,
+                font=("Arial", 12, "bold"),
+                bg="#FF9800",
+                fg="white",
+                padx=15,
+                pady=8,
+            ).pack(side=tk.LEFT, padx=5)
+
+    def restablecer_contrasena_profesional(self):
+        if self.table != "profesionales":
+            return
+        if not self.registro_seleccionado:
+            messagebox.showwarning("Aviso", "Selecciona un profesional primero")
+            return
+        profesional_id = self.registro_seleccionado.get("id")
+        if profesional_id is None:
+            messagebox.showerror("Error", "El profesional seleccionado no tiene ID valido")
+            return
+
+        nombre = (
+            self.registro_seleccionado.get("nombre_profesional")
+            or self.registro_seleccionado.get("usuario_login")
+            or str(profesional_id)
+        )
+        sugerida = _generate_temp_password()
+
+        nueva = simpledialog.askstring(
+            "Restablecer contraseña",
+            f"Nueva contraseña para '{nombre}':",
+            initialvalue=sugerida,
+            parent=self.root,
+        )
+        if nueva is None:
+            return
+        nueva = nueva.strip()
+        if len(nueva) < 8:
+            messagebox.showerror("Error", "La contraseña debe tener al menos 8 caracteres")
+            return
+
+        try:
+            hash_value = _make_django_pbkdf2_sha256(nueva)
+            response = self.supabase.rpc(
+                "admin_reset_profesional_password",
+                {
+                    "p_profesional_id": int(profesional_id),
+                    "p_new_password": nueva,
+                    "p_new_password_hash": hash_value,
+                },
+            ).execute()
+
+            result = response.data
+            auth_updated = False
+            if isinstance(result, dict):
+                auth_updated = bool(result.get("auth_user_updated"))
+            LOG.info(
+                "Password reset for profesional_id=%s auth_updated=%s",
+                profesional_id,
+                auth_updated,
+            )
+
+            messagebox.showinfo(
+                "Contraseña restablecida",
+                "Contraseña actualizada correctamente.\n\n"
+                f"Usuario: {nombre}\n"
+                f"Nueva contraseña: {nueva}\n"
+                f"Actualizada en Auth: {'Sí' if auth_updated else 'No (sin auth_user_id)'}",
+            )
+            self.cargar_registros()
+        except Exception as e:
+            LOG.exception("Error restableciendo contraseña de profesional id=%s", profesional_id)
+            messagebox.showerror(
+                "Error",
+                "No se pudo restablecer la contraseña.\n"
+                f"Detalle: {e}\n"
+                f"Revisa logs en {_get_error_log_path()}",
+            )
+
     def cargar_registros(self):
         if not self.supabase:
             return
@@ -2456,6 +2637,17 @@ class AppRECA:
 
         tk.Button(
             btn_frame,
+            text="Importar Excel",
+            command=self.importar_empresas_excel,
+            font=("Arial", 12, "bold"),
+            bg="#1E88E5",
+            fg="white",
+            padx=15,
+            pady=8,
+        ).pack(side=tk.LEFT, padx=5)
+
+        tk.Button(
+            btn_frame,
             text="Editar",
             command=self.editar_empresa,
             font=("Arial", 12, "bold"),
@@ -2486,6 +2678,430 @@ class AppRECA:
             padx=15,
             pady=8,
         ).pack(side=tk.LEFT, padx=5)
+
+    def _build_excel_index_map(self, headers):
+        header_keys = [_header_key(h) for h in headers]
+
+        def pick(keys, default=None):
+            for idx, key in enumerate(header_keys):
+                if key in keys:
+                    return idx
+            return default
+
+        cargo_indices = [idx for idx, key in enumerate(header_keys) if key == "cargo"]
+        cargo_contacto_idx = pick({"cargocontacto"}, None)
+        cargo_responsable_idx = pick({"cargoresponsable"}, None)
+
+        if cargo_contacto_idx is None:
+            cargo_contacto_idx = cargo_indices[0] if cargo_indices else 6
+        if cargo_responsable_idx is None:
+            cargo_responsable_idx = cargo_indices[1] if len(cargo_indices) > 1 else cargo_contacto_idx
+
+        return {
+            "nombre_empresa": pick({"nombre", "nombreempresa"}, 0),
+            "nit_empresa": pick({"nit", "nitempresa"}, 1),
+            "direccion_empresa": pick({"direccion", "direccionempresa"}, 2),
+            "ciudad_empresa": pick({"ciudad", "ciudadempresa"}, 3),
+            "correo_1": pick({"correo1"}, 4),
+            "contacto_empresa": pick({"contacto", "contactoempresa"}, 5),
+            "cargo_contacto": cargo_contacto_idx,
+            "sede_empresa": pick({"sede", "sedeempresa"}, 7),
+            "telefono_empresa": pick({"telefono", "telefonoempresa"}, 8),
+            "responsable_visita": pick({"responsabledelavisita", "responsablevisita"}, 9),
+            "cargo_responsable": cargo_responsable_idx,
+            "asesor": pick({"asesor"}, 11),
+            "correo_asesor": pick({"correodeasesor", "correoasesor"}, 12),
+            "zona_empresa": pick({"zona", "zonaempresa"}, 13),
+            "caja_compensacion": pick({"cajadecompensacion", "cajacompensacion"}, 14),
+            "profesional_asignado": pick({"profesionalasignado"}, 15),
+            "correo_profesional": pick({"correoprofesional", "correoprofesionalasignado"}, 16),
+            "estado": pick({"estado"}, 17),
+            "observaciones": pick({"observaciones", "observacion"}, 18),
+        }
+
+    def _map_excel_row(self, row, idx):
+        def cell(index):
+            if index is None:
+                return None
+            if index < 0 or index >= len(row):
+                return None
+            return row[index]
+
+        cargo = _clean_text(cell(idx.get("cargo_responsable"))) or _clean_text(cell(idx.get("cargo_contacto")))
+
+        return {
+            "nombre_empresa": _clean_text(cell(idx.get("nombre_empresa"))),
+            "nit_empresa": _clean_text(cell(idx.get("nit_empresa"))),
+            "direccion_empresa": _clean_text(cell(idx.get("direccion_empresa"))),
+            "ciudad_empresa": _clean_text(cell(idx.get("ciudad_empresa"))),
+            "correo_1": _clean_text(cell(idx.get("correo_1"))),
+            "contacto_empresa": _clean_text(cell(idx.get("contacto_empresa"))),
+            "cargo": cargo,
+            "sede_empresa": _clean_text(cell(idx.get("sede_empresa"))),
+            "telefono_empresa": _clean_text(cell(idx.get("telefono_empresa"))),
+            "responsable_visita": _clean_text(cell(idx.get("responsable_visita"))),
+            "asesor": _clean_text(cell(idx.get("asesor"))),
+            "correo_asesor": _clean_text(cell(idx.get("correo_asesor"))),
+            "zona_empresa": _clean_text(cell(idx.get("zona_empresa"))),
+            "caja_compensacion": _clean_text(cell(idx.get("caja_compensacion"))),
+            "profesional_asignado": _clean_text(cell(idx.get("profesional_asignado"))),
+            "correo_profesional": _clean_text(cell(idx.get("correo_profesional"))),
+            "estado": _clean_text(cell(idx.get("estado"))),
+            "observaciones": _clean_text(cell(idx.get("observaciones"))),
+        }
+
+    def _fetch_existing_empresa_pairs(self):
+        existing_pairs = set()
+        offset = 0
+        while True:
+            query = (
+                self.supabase.table("empresas")
+                .select("nit_empresa,nombre_empresa")
+                .order("id", desc=False)
+                .range(offset, offset + self.BATCH_SIZE - 1)
+            )
+            data = query.execute().data or []
+            if not data:
+                break
+            for row in data:
+                key_pair = (
+                    _normalize_nit(row.get("nit_empresa")),
+                    _normalize_name(row.get("nombre_empresa")),
+                )
+                existing_pairs.add(key_pair)
+            offset += len(data)
+            if len(data) < self.BATCH_SIZE:
+                break
+        return existing_pairs
+
+    def _crear_tab_resumen_importacion(self, parent, title, rows, with_checkbox=False, on_selection_change=None):
+        frame = tk.Frame(parent)
+        parent.add(frame, text=f"{title} ({len(rows)})")
+
+        selection_state = None
+        if with_checkbox:
+            columns = ("seleccion", "nombre_empresa", "nit_empresa", "ciudad_empresa", "estado")
+        else:
+            columns = ("nombre_empresa", "nit_empresa", "ciudad_empresa", "estado")
+
+        tree = ttk.Treeview(frame, columns=columns, show="headings", height=12)
+        if with_checkbox:
+            tree.heading("seleccion", text="Subir")
+            tree.column("seleccion", width=70, anchor="center")
+        tree.heading("nombre_empresa", text="Nombre Empresa")
+        tree.heading("nit_empresa", text="NIT")
+        tree.heading("ciudad_empresa", text="Ciudad")
+        tree.heading("estado", text="Estado")
+        tree.column("nombre_empresa", width=420)
+        tree.column("nit_empresa", width=160)
+        tree.column("ciudad_empresa", width=160)
+        tree.column("estado", width=120)
+
+        scroll_y = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=scroll_y.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        scroll_y.grid(row=0, column=1, sticky="ns")
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+
+        max_preview = len(rows) if with_checkbox else 500
+        if with_checkbox:
+            selection_state = {"selected": {}, "rows": {}}
+
+        for row in rows[:max_preview]:
+            if with_checkbox:
+                item_id = tree.insert(
+                    "",
+                    tk.END,
+                    values=(
+                        "[x]",
+                        row.get("nombre_empresa", ""),
+                        row.get("nit_empresa", ""),
+                        row.get("ciudad_empresa", ""),
+                        row.get("estado", ""),
+                    ),
+                )
+                selection_state["selected"][item_id] = True
+                selection_state["rows"][item_id] = row
+            else:
+                tree.insert(
+                    "",
+                    tk.END,
+                    values=(
+                        row.get("nombre_empresa", ""),
+                        row.get("nit_empresa", ""),
+                        row.get("ciudad_empresa", ""),
+                        row.get("estado", ""),
+                    ),
+                )
+
+        if len(rows) > max_preview:
+            tk.Label(
+                frame,
+                text=f"Mostrando {max_preview} de {len(rows)} registros",
+                font=("Arial", 9),
+                fg="#666666",
+            ).grid(row=1, column=0, sticky="w", pady=(6, 0))
+
+        if with_checkbox:
+            def _notify():
+                if on_selection_change:
+                    on_selection_change(selection_state)
+                dynamic_callback = selection_state.get("on_change")
+                if dynamic_callback:
+                    dynamic_callback(selection_state)
+
+            def toggle_item(item_id):
+                if not item_id:
+                    return
+                current = selection_state["selected"].get(item_id, True)
+                selection_state["selected"][item_id] = not current
+                values = list(tree.item(item_id, "values"))
+                if values:
+                    values[0] = "[x]" if not current else "[ ]"
+                    tree.item(item_id, values=values)
+                _notify()
+
+            def on_click(event):
+                if tree.identify("region", event.x, event.y) != "cell":
+                    return
+                if tree.identify_column(event.x) != "#1":
+                    return
+                toggle_item(tree.identify_row(event.y))
+
+            tree.bind("<Button-1>", on_click)
+
+            controls = tk.Frame(frame)
+            controls.grid(row=2, column=0, sticky="w", pady=(8, 0))
+
+            def set_all(value):
+                for item_id in tree.get_children(""):
+                    selection_state["selected"][item_id] = value
+                    values = list(tree.item(item_id, "values"))
+                    if values:
+                        values[0] = "[x]" if value else "[ ]"
+                        tree.item(item_id, values=values)
+                _notify()
+
+            tk.Button(
+                controls,
+                text="Marcar todos",
+                command=lambda: set_all(True),
+                font=("Arial", 9, "bold"),
+                bg=COLOR_TEAL,
+                fg="white",
+                padx=8,
+                pady=3,
+            ).pack(side=tk.LEFT, padx=(0, 6))
+
+            tk.Button(
+                controls,
+                text="Desmarcar todos",
+                command=lambda: set_all(False),
+                font=("Arial", 9, "bold"),
+                bg="#607D8B",
+                fg="white",
+                padx=8,
+                pady=3,
+            ).pack(side=tk.LEFT)
+
+            _notify()
+
+        return selection_state
+
+    def _confirmar_subida_importacion_excel(self, window, empresas_a_subir):
+        if not empresas_a_subir:
+            messagebox.showinfo("Importacion", "No hay empresas nuevas para subir.")
+            return
+
+        confirmar = messagebox.askyesno(
+            "Confirmar subida",
+            f"Se subiran {len(empresas_a_subir)} empresas nuevas a la nube.\n\nDeseas continuar?",
+        )
+        if not confirmar:
+            return
+
+        try:
+            inserted = 0
+            chunk_size = 200
+            for idx in range(0, len(empresas_a_subir), chunk_size):
+                chunk = empresas_a_subir[idx:idx + chunk_size]
+                self.supabase.table("empresas").insert(chunk).execute()
+                inserted += len(chunk)
+
+            LOG.info("Importacion Excel empresas completada. Insertadas: %s", inserted)
+            messagebox.showinfo("Importacion", f"Importacion completada.\nEmpresas subidas: {inserted}")
+            if window and window.winfo_exists():
+                window.destroy()
+            self.cargar_todas_empresas()
+        except Exception as e:
+            LOG.exception("Error subiendo importacion Excel de empresas")
+            messagebox.showerror("Error", f"No se pudo completar la importacion:\n{e}")
+
+    def _mostrar_resumen_importacion_excel(self, file_path, nuevas, repetidas_bd, repetidas_archivo, filas_validas):
+        window = tk.Toplevel(self.root)
+        window.title("Resumen importacion Excel")
+        window.geometry("1200x760")
+        _maximize_window(window)
+
+        wrap = tk.Frame(window, bg=COLOR_LIGHT_BG)
+        wrap.pack(fill=tk.BOTH, expand=True, padx=14, pady=12)
+
+        tk.Label(
+            wrap,
+            text="Resumen de importacion de empresas",
+            font=("Arial", 16, "bold"),
+            bg=COLOR_LIGHT_BG,
+            fg=COLOR_PURPLE,
+        ).pack(anchor="w")
+
+        tk.Label(
+            wrap,
+            text=f"Archivo: {file_path}",
+            font=("Arial", 10),
+            bg=COLOR_LIGHT_BG,
+            fg="#4a4a4a",
+            wraplength=1100,
+            justify="left",
+        ).pack(anchor="w", pady=(2, 8))
+
+        summary = (
+            f"Filas validas: {filas_validas}    "
+            f"Nuevas: {len(nuevas)}    "
+            f"Repetidas en nube (NIT + Nombre): {len(repetidas_bd)}    "
+            f"Repetidas dentro del archivo: {len(repetidas_archivo)}"
+        )
+        tk.Label(
+            wrap,
+            text=summary,
+            font=("Arial", 11, "bold"),
+            bg=COLOR_LIGHT_BG,
+            fg=COLOR_TEAL,
+        ).pack(anchor="w", pady=(0, 10))
+
+        notebook = ttk.Notebook(wrap)
+        notebook.pack(fill=tk.BOTH, expand=True)
+        nuevas_selection = self._crear_tab_resumen_importacion(
+            notebook,
+            "Nuevas",
+            nuevas,
+            with_checkbox=True,
+        )
+        self._crear_tab_resumen_importacion(notebook, "Repetidas en nube", repetidas_bd)
+        self._crear_tab_resumen_importacion(notebook, "Repetidas en archivo", repetidas_archivo)
+
+        btn_row = tk.Frame(wrap, bg=COLOR_LIGHT_BG)
+        btn_row.pack(fill=tk.X, pady=(10, 0))
+
+        def selected_rows():
+            if not nuevas_selection:
+                return list(nuevas)
+            return [
+                row
+                for item_id, row in nuevas_selection["rows"].items()
+                if nuevas_selection["selected"].get(item_id, False)
+            ]
+
+        def refresh_confirm_button(_=None):
+            count = len(selected_rows())
+            confirm_btn.config(
+                text=f"Confirmar y subir {count}",
+                state=tk.NORMAL if count else tk.DISABLED,
+            )
+
+        if nuevas_selection is not None:
+            nuevas_selection["on_change"] = refresh_confirm_button
+
+        confirm_btn = tk.Button(
+            btn_row,
+            text=f"Confirmar y subir {len(nuevas)}",
+            command=lambda: self._confirmar_subida_importacion_excel(window, selected_rows()),
+            font=("Arial", 11, "bold"),
+            bg=COLOR_TEAL,
+            fg="white",
+            padx=12,
+            pady=6,
+            state=tk.NORMAL if nuevas else tk.DISABLED,
+        )
+        confirm_btn.pack(side=tk.LEFT, padx=(0, 8))
+        refresh_confirm_button()
+
+        tk.Button(
+            btn_row,
+            text="Cerrar",
+            command=window.destroy,
+            font=("Arial", 11, "bold"),
+            bg=COLOR_PURPLE,
+            fg="white",
+            padx=12,
+            pady=6,
+        ).pack(side=tk.LEFT)
+
+    def importar_empresas_excel(self):
+        if not self.supabase:
+            return
+
+        file_path = filedialog.askopenfilename(
+            title="Selecciona archivo Excel de empresas",
+            filetypes=[("Excel", "*.xlsx"), ("Todos", "*.*")],
+        )
+        if not file_path:
+            return
+
+        try:
+            wb = load_workbook(file_path, data_only=True)
+            ws = wb[wb.sheetnames[0]]
+            header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+            if not header_row:
+                messagebox.showwarning("Importacion", "El archivo no tiene encabezados.")
+                return
+
+            idx = self._build_excel_index_map(list(header_row))
+            existing_pairs = self._fetch_existing_empresa_pairs()
+
+            nuevas = []
+            repetidas_bd = []
+            repetidas_archivo = []
+            seen_in_file = set()
+            filas_validas = 0
+
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                record = self._map_excel_row(row, idx)
+                if not any(record.values()):
+                    continue
+
+                key_pair = (
+                    _normalize_nit(record.get("nit_empresa")),
+                    _normalize_name(record.get("nombre_empresa")),
+                )
+                if not key_pair[0] and not key_pair[1]:
+                    continue
+                filas_validas += 1
+
+                if key_pair in seen_in_file:
+                    repetidas_archivo.append(record)
+                    continue
+
+                seen_in_file.add(key_pair)
+                if key_pair in existing_pairs:
+                    repetidas_bd.append(record)
+                else:
+                    nuevas.append(record)
+
+            self._mostrar_resumen_importacion_excel(
+                file_path=file_path,
+                nuevas=nuevas,
+                repetidas_bd=repetidas_bd,
+                repetidas_archivo=repetidas_archivo,
+                filas_validas=filas_validas,
+            )
+        except Exception as e:
+            LOG.exception("Error importando archivo Excel de empresas")
+            messagebox.showerror(
+                "Error",
+                "No se pudo procesar el archivo Excel.\n"
+                f"Detalle: {e}",
+            )
 
     def cargar_todas_empresas(self):
         """
