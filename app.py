@@ -45,7 +45,7 @@ from supabase import create_client, Client
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.12"
+APP_VERSION = "1.0.13"
 
 GITHUB_OWNER = "auyaban"
 
@@ -61,7 +61,7 @@ COLOR_LIGHT_BG = "#F7F5FA"
 REQUEST_HEADERS = {"User-Agent": f"{APP_NAME}/{APP_VERSION}"}
 
 DEFAULT_SUPABASE_AUTH_EMAIL = "test@reca.local"
-DEFAULT_SUPABASE_AUTH_PASSWORD = "Reca.Test.2026!"
+DEFAULT_SUPABASE_AUTH_PASSWORD = "Reca.Test.2026!v3"
 
 
 
