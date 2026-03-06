@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-import hashlib
 import base64
+import hashlib
 import logging
 
 import logging.handlers
@@ -22,7 +22,7 @@ import secrets
 
 import tkinter as tk
 
-from tkinter import ttk, messagebox, scrolledtext, filedialog, simpledialog
+from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 
 
@@ -45,7 +45,7 @@ from supabase import create_client, Client
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.13"
+APP_VERSION = "1.0.14"
 
 GITHUB_OWNER = "auyaban"
 
@@ -62,6 +62,7 @@ REQUEST_HEADERS = {"User-Agent": f"{APP_NAME}/{APP_VERSION}"}
 
 DEFAULT_SUPABASE_AUTH_EMAIL = "test@reca.local"
 DEFAULT_SUPABASE_AUTH_PASSWORD = "Reca.Test.2026!v3"
+DEFAULT_PROFESIONAL_TEMP_PASSWORD = "Password1234"
 
 
 
@@ -365,17 +366,14 @@ def _header_key(value):
     return re.sub(r"[^a-z0-9]+", "", text.lower())
 
 
-def _generate_temp_password(length=12):
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%*"
-    return "".join(secrets.choice(alphabet) for _ in range(length))
-
-
-def _make_django_pbkdf2_sha256(password, iterations=260000):
-    # Django-compatible hash string for projects that validate against usuario_pass_hash.
-    salt = secrets.token_urlsafe(12).replace("$", "").replace("=", "")
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations)
-    encoded = base64.b64encode(digest).decode("ascii").strip()
-    return f"pbkdf2_sha256${iterations}${salt}${encoded}"
+def _make_il_password_hash(password, iterations=260000):
+    # Hash compatible with RECA Inclusion Laboral offline login verification.
+    pwd = str(password or "")
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", pwd.encode("utf-8"), salt, iterations)
+    salt_b64 = base64.urlsafe_b64encode(salt).decode("ascii").rstrip("=")
+    digest_b64 = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+    return f"pbkdf2_sha256${iterations}${salt_b64}${digest_b64}"
 
 
 
@@ -684,7 +682,6 @@ class FormularioEmpresa(tk.Toplevel):
             "sede_empresa",
             "zona_empresa",
             "responsable_visita",
-            "profesional_asignado",
             "cargo",
             "contacto_empresa",
             "telefono_empresa",
@@ -697,6 +694,7 @@ class FormularioEmpresa(tk.Toplevel):
             "correo_asesor",
         ], "#FFF3E0"),
         ("RECA", [
+            "profesional_asignado",
             "correo_profesional",
         ], "#F3E5F5"),
         ("Observaciones", [
@@ -1668,23 +1666,46 @@ class AppEntidad:
             or self.registro_seleccionado.get("usuario_login")
             or str(profesional_id)
         )
-        sugerida = _generate_temp_password()
+        usuario_login = (self.registro_seleccionado.get("usuario_login") or "").strip()
+        correo_profesional = (self.registro_seleccionado.get("correo_profesional") or "").strip()
+        auth_user_id = str(self.registro_seleccionado.get("auth_user_id") or "").strip()
+        nueva = DEFAULT_PROFESIONAL_TEMP_PASSWORD
 
-        nueva = simpledialog.askstring(
-            "Restablecer contraseña",
-            f"Nueva contraseña para '{nombre}':",
-            initialvalue=sugerida,
+        if not usuario_login:
+            messagebox.showerror(
+                "Error",
+                "Este profesional no tiene 'Usuario Login' configurado.\n"
+                "Sin ese dato no puede ingresar a RECA Inclusion Laboral.",
+            )
+            return
+        if not correo_profesional:
+            messagebox.showerror(
+                "Error",
+                "Este profesional no tiene 'Correo Profesional' configurado.\n"
+                "Sin ese dato no puede iniciar sesion en RECA Inclusion Laboral.",
+            )
+            return
+        if not auth_user_id:
+            messagebox.showerror(
+                "Error",
+                "Este profesional no tiene cuenta Auth enlazada en Supabase.\n"
+                "Vincula la cuenta antes de restablecer la contrasena.",
+            )
+            return
+        confirmar = messagebox.askyesno(
+            "Restablecer contrasena",
+            "Se restablecera la contrasena temporal para RECA Inclusion Laboral.\n\n"
+            f"Profesional: {nombre}\n"
+            f"Usuario login: {usuario_login}\n"
+            f"Correo Auth: {correo_profesional}\n"
+            f"Contrasena temporal: {nueva}\n\n"
+            "Deseas continuar?",
             parent=self.root,
         )
-        if nueva is None:
+        if not confirmar:
             return
-        nueva = nueva.strip()
-        if len(nueva) < 8:
-            messagebox.showerror("Error", "La contraseña debe tener al menos 8 caracteres")
-            return
-
         try:
-            hash_value = _make_django_pbkdf2_sha256(nueva)
+            hash_value = _make_il_password_hash(nueva)
             response = self.supabase.rpc(
                 "admin_reset_profesional_password",
                 {
@@ -1699,24 +1720,25 @@ class AppEntidad:
             if isinstance(result, dict):
                 auth_updated = bool(result.get("auth_user_updated"))
             LOG.info(
-                "Password reset for profesional_id=%s auth_updated=%s",
+                "Password reset for profesional_id=%s auth_updated=%s usuario_login=%s",
                 profesional_id,
                 auth_updated,
+                usuario_login,
             )
 
             messagebox.showinfo(
-                "Contraseña restablecida",
-                "Contraseña actualizada correctamente.\n\n"
-                f"Usuario: {nombre}\n"
-                f"Nueva contraseña: {nueva}\n"
-                f"Actualizada en Auth: {'Sí' if auth_updated else 'No (sin auth_user_id)'}",
+                "Contrasena restablecida",
+                "Contrasena actualizada correctamente.\n\n"
+                f"Usuario login: {usuario_login}\n"
+                f"Contrasena temporal: {nueva}\n"
+                f"Actualizada en Auth: {'Si' if auth_updated else 'No (sin auth_user_id)'}",
             )
             self.cargar_registros()
         except Exception as e:
-            LOG.exception("Error restableciendo contraseña de profesional id=%s", profesional_id)
+            LOG.exception("Error restableciendo contrasena de profesional id=%s", profesional_id)
             messagebox.showerror(
                 "Error",
-                "No se pudo restablecer la contraseña.\n"
+                "No se pudo restablecer la contrasena.\n"
                 f"Detalle: {e}\n"
                 f"Revisa logs en {_get_error_log_path()}",
             )
