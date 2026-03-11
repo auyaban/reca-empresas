@@ -45,7 +45,7 @@ from supabase import create_client, Client
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.14"
+APP_VERSION = "1.0.15"
 
 GITHUB_OWNER = "auyaban"
 
@@ -81,6 +81,54 @@ def _maximize_window(window):
             window.attributes("-zoomed", True)
         except tk.TclError:
             pass
+
+
+class ScrollableFrame(tk.Frame):
+    """Contenedor scrollable reutilizable para formularios construidos con grid."""
+
+    def __init__(self, parent, bg=None, **kwargs):
+        super().__init__(parent, bg=bg, **kwargs)
+        self._bg = bg
+        canvas_bg = bg if bg is not None else self.cget("bg")
+        self.canvas = tk.Canvas(self, bg=canvas_bg, highlightthickness=0, borderwidth=0)
+        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.content = tk.Frame(self.canvas, bg=bg)
+
+        self._content_window = self.canvas.create_window((0, 0), window=self.content, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+
+        self.content.bind("<Configure>", self._on_content_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+
+    def _on_content_configure(self, _event=None):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        self._bind_mousewheel_recursive(self.content)
+
+    def _on_canvas_configure(self, event):
+        self.canvas.itemconfigure(self._content_window, width=event.width)
+
+    def _bind_mousewheel_recursive(self, widget):
+        if not getattr(widget, "_scrollable_mousewheel_bound", False):
+            for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                widget.bind(sequence, self._on_mousewheel, add="+")
+            widget._scrollable_mousewheel_bound = True
+        for child in widget.winfo_children():
+            self._bind_mousewheel_recursive(child)
+
+    def _on_mousewheel(self, event):
+        if event.num == 4:
+            delta = -1
+        elif event.num == 5:
+            delta = 1
+        else:
+            delta = -1 * int(event.delta / 120) if event.delta else 0
+
+        if delta:
+            self.canvas.yview_scroll(delta, "units")
+        return "break"
 
 
 class SplashScreen(tk.Toplevel):
@@ -661,8 +709,8 @@ class FormularioEmpresa(tk.Toplevel):
         "contacto_empresa": ("Contacto(s)", False),
         "cargo": ("Cargo", False),
         "telefono_empresa": ("Teléfono(s)", False),
-        "sede_empresa": ("Sede", False),
-        "zona_empresa": ("Zona", False),
+        "sede_empresa": ("Sede Empresa", False),
+        "zona_empresa": ("Zona Compensar", False),
         "responsable_visita": ("Responsable Visita", False),
         "asesor": ("Asesor", False),
         "correo_asesor": ("Email Asesor", False),
@@ -680,7 +728,6 @@ class FormularioEmpresa(tk.Toplevel):
             "direccion_empresa",
             "ciudad_empresa",
             "sede_empresa",
-            "zona_empresa",
             "responsable_visita",
             "cargo",
             "contacto_empresa",
@@ -690,6 +737,7 @@ class FormularioEmpresa(tk.Toplevel):
         ], "#E6F4EA"),
         ("Compensar", [
             "caja_compensacion",
+            "zona_empresa",
             "asesor",
             "correo_asesor",
         ], "#FFF3E0"),
@@ -704,6 +752,17 @@ class FormularioEmpresa(tk.Toplevel):
 
     ESTADOS_DISPONIBLES = ["Activa", "En Proceso", "Pausada", "Cerrada", "Inactiva"]
     CAJAS_COMPENSACION = ["Compensar", "No Compensar"]
+    ZONAS_COMPENSAR = {
+        "soacha": "Soacha",
+        "universidad_compensar": "Universidad Compensar",
+        "kennedy": "Kennedy",
+        "mosquera": "Mosquera",
+        "cajica": "Cajicá",
+        "girardot": "Girardot",
+        "suba": "Suba",
+        "empleabilidad_estrategica": "Empleabilidad Estrategica",
+        "por_confirmar": "Por Confirmar",
+    }
 
     def __init__(self, parent, supabase, empresa=None):
         """
@@ -744,73 +803,31 @@ class FormularioEmpresa(tk.Toplevel):
 
     def crear_formulario(self):
 
-        """Construye la interfaz del formulario con scroll"""
+        """Construye la interfaz del formulario con un grid scrollable."""
 
-
-
-        # Canvas con scrollbar para manejar muchos campos
-
-        canvas = tk.Canvas(self)
-
-        scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
-
-        scrollable_frame = ttk.Frame(canvas)
-
-
-
-        # Actualizar región de scroll cuando cambia el tamaño
-
-        scrollable_frame.bind(
-
-            "<Configure>",
-
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-
-        )
-
-
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-
-
-        # Título del formulario
+        scroll = ScrollableFrame(self, bg=COLOR_LIGHT_BG)
+        scroll.pack(fill="both", expand=True)
+        scroll.content.grid_columnconfigure(0, weight=1)
 
         titulo_text = "Editar Empresa" if self.empresa else "Nueva Empresa"
 
         titulo_label = tk.Label(
 
-            scrollable_frame,
+            scroll.content,
 
             text=titulo_text,
 
-            font=("Arial", 18, "bold")
+            font=("Arial", 18, "bold"),
+            bg=COLOR_LIGHT_BG,
+            fg=COLOR_PURPLE,
 
         )
 
         titulo_label.grid(row=0, column=0, columnspan=4, pady=20)
 
+        last_row = self._crear_campos(scroll.content)
 
-
-        # Crear campos dinámicamente
-
-        last_row = self._crear_campos(scrollable_frame)
-
-
-
-        # Crear botones de acción
-
-        self._crear_botones(scrollable_frame, last_row + 1)
-
-
-
-        # Empaquetar canvas y scrollbar
-
-        canvas.pack(side="left", fill="both", expand=True)
-
-        scrollbar.pack(side="right", fill="y")
+        self._crear_botones(scroll.content, last_row + 1)
 
 
 
@@ -861,6 +878,8 @@ class FormularioEmpresa(tk.Toplevel):
                     widget = self._crear_campo_estado(frame)
                 elif campo == "caja_compensacion":
                     widget = self._crear_campo_caja_compensacion(frame)
+                elif campo == "zona_empresa":
+                    widget = self._crear_campo_zona_compensar(frame)
                 elif campo == "asesor":
                     widget = self._crear_campo_asesor(frame)
                 elif campo == "profesional_asignado":
@@ -964,6 +983,22 @@ class FormularioEmpresa(tk.Toplevel):
             widget.set(valor)
         else:
             widget.set("Compensar")
+
+        return widget
+
+    def _crear_campo_zona_compensar(self, parent):
+        """Crea combobox editable para el campo zona_compensar usando opciones locales"""
+        widget = ttk.Combobox(
+            parent,
+            values=list(self.ZONAS_COMPENSAR.values()),
+            state="normal",
+            width=40,
+            font=("Arial", 10)
+        )
+
+        if self.empresa:
+            valor = self.empresa.get("zona_empresa", "") or ""
+            widget.set(valor)
 
         return widget
 
@@ -1405,8 +1440,10 @@ class FormularioEntidad(tk.Toplevel):
         self.grab_set()
 
     def _crear_formulario(self):
-        container = tk.Frame(self)
-        container.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
+        scroll = ScrollableFrame(self)
+        scroll.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
+        container = scroll.content
+        container.grid_columnconfigure(1, weight=1)
 
         row = 0
         for campo, label, required, widget_type in self.campos_config:
@@ -1476,8 +1513,6 @@ class FormularioEntidad(tk.Toplevel):
             padx=20,
             pady=8,
         ).pack(side=tk.LEFT, padx=6)
-
-        container.grid_columnconfigure(1, weight=1)
 
     def guardar(self):
         datos = {}
@@ -2153,12 +2188,12 @@ class AppRECA:
         "nit_empresa": "NIT",
         "ciudad_empresa": "Ciudad",
         "estado": "Estado",
-        "zona_empresa": "Zona",
+        "zona_empresa": "Zona Compensar",
         "profesional_asignado": "Profesional Asignado",
         "asesor": "Asesor",
         "contacto_empresa": "Contacto(s)",
         "telefono_empresa": "Teléfono(s)",
-        "sede_empresa": "Sede",
+        "sede_empresa": "Sede Empresa",
     }
 
 
@@ -2446,7 +2481,7 @@ class AppRECA:
             self.filtros_frame, "Caja Compensación", 0, 5
         )
         self.filtro_zona = self._crear_filtro_combo(
-            self.filtros_frame, "Zona", 1, 1
+            self.filtros_frame, "Zona Compensar", 1, 1
         )
         self.filtro_estado = self._crear_filtro_combo(
             self.filtros_frame, "Estado", 1, 3
