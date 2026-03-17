@@ -756,6 +756,7 @@ class FormularioEmpresa(tk.Toplevel):
         "soacha": "Soacha",
         "universidad_compensar": "Universidad Compensar",
         "kennedy": "Kennedy",
+        "chapinero": "Chapinero",
         "mosquera": "Mosquera",
         "cajica": "Cajicá",
         "girardot": "Girardot",
