@@ -45,7 +45,7 @@ from supabase import create_client, Client
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.15"
+APP_VERSION = "1.0.17"
 
 GITHUB_OWNER = "auyaban"
 
@@ -757,6 +757,7 @@ class FormularioEmpresa(tk.Toplevel):
         "universidad_compensar": "Universidad Compensar",
         "kennedy": "Kennedy",
         "chapinero": "Chapinero",
+        "bosa": "Bosa",
         "mosquera": "Mosquera",
         "cajica": "Cajicá",
         "girardot": "Girardot",
@@ -881,6 +882,8 @@ class FormularioEmpresa(tk.Toplevel):
                     widget = self._crear_campo_caja_compensacion(frame)
                 elif campo == "zona_empresa":
                     widget = self._crear_campo_zona_compensar(frame)
+                elif campo == "cargo":
+                    widget = self._crear_campo_cargo(frame)
                 elif campo == "asesor":
                     widget = self._crear_campo_asesor(frame)
                 elif campo == "profesional_asignado":
@@ -891,7 +894,7 @@ class FormularioEmpresa(tk.Toplevel):
                     widget = self._crear_campo_texto(frame, campo)
 
                 self.campos[campo] = widget
-                if campo == "observaciones":
+                if campo in {"cargo", "observaciones"}:
                     widget.grid(row=inner_row, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
                 else:
                     widget.grid(row=inner_row, column=1, columnspan=3, sticky="w", padx=6, pady=4)
@@ -984,6 +987,22 @@ class FormularioEmpresa(tk.Toplevel):
             widget.set(valor)
         else:
             widget.set("Compensar")
+
+        return widget
+
+    def _crear_campo_cargo(self, parent):
+        """Crea un area de texto amplia para cargos largos."""
+        widget = scrolledtext.ScrolledText(
+            parent,
+            width=50,
+            height=3,
+            wrap=tk.WORD,
+            font=("Arial", 10)
+        )
+
+        if self.empresa:
+            valor = self.empresa.get("cargo", "") or ""
+            widget.insert("1.0", valor)
 
         return widget
 
@@ -1292,7 +1311,7 @@ class FormularioEmpresa(tk.Toplevel):
 
         for campo, widget in self.campos.items():
 
-            if campo == "observaciones":
+            if campo in {"cargo", "observaciones"}:
 
                 datos[campo] = widget.get("1.0", tk.END).strip()
 
@@ -1901,8 +1920,9 @@ class AppMenu:
             fg="white",
         ).pack(side=tk.LEFT, padx=20)
 
-        body = tk.Frame(self.root, bg=COLOR_LIGHT_BG)
-        body.pack(fill=tk.BOTH, expand=True, padx=40, pady=40)
+        body_scroll = ScrollableFrame(self.root, bg=COLOR_LIGHT_BG)
+        body_scroll.pack(fill=tk.BOTH, expand=True, padx=40, pady=(40, 20))
+        body = body_scroll.content
 
         tk.Label(
             body,
@@ -1914,6 +1934,19 @@ class AppMenu:
 
         btn_frame = tk.Frame(body, bg=COLOR_LIGHT_BG)
         btn_frame.pack(pady=20)
+
+        self.update_btn = tk.Button(
+            btn_frame,
+            text="Actualizar app",
+            command=self._manual_update,
+            font=("Arial", 9, "bold"),
+            bg=COLOR_TEAL,
+            fg="white",
+            padx=10,
+            pady=4,
+            width=16,
+        )
+        self.update_btn.pack(pady=(0, 12))
 
         self._crear_boton_modulo(btn_frame, "Empresas", self._abrir_empresas)
         self._crear_boton_modulo(btn_frame, "Asesores", self._abrir_asesores)
@@ -1940,18 +1973,6 @@ class AppMenu:
             anchor="w",
         )
         self.version_label.pack(anchor="w")
-
-        self.update_btn = tk.Button(
-            info_wrap,
-            text="Actualizar app",
-            command=self._manual_update,
-            font=("Arial", 8, "bold"),
-            bg=COLOR_TEAL,
-            fg="white",
-            padx=8,
-            pady=2,
-        )
-        self.update_btn.pack(anchor="w", pady=(2, 0))
 
     def _fetch_latest_version_async(self):
         def worker():
