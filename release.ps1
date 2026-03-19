@@ -55,8 +55,8 @@ if (-not (Get-Command $gh -ErrorAction SilentlyContinue)) {
 
 & $gh auth status -h github.com | Out-Null
 
-& $gh release view $version *> $null
-if ($LASTEXITCODE -eq 0) {
+$releaseCheck = Start-Process -FilePath $gh -ArgumentList @("release", "view", $version) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $null -RedirectStandardError $null
+if ($releaseCheck.ExitCode -eq 0) {
     Write-Host "Release $version already exists."
     exit 1
 }
