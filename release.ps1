@@ -55,8 +55,13 @@ if (-not (Get-Command $gh -ErrorAction SilentlyContinue)) {
 
 & $gh auth status -h github.com | Out-Null
 
-$releaseCheck = Start-Process -FilePath $gh -ArgumentList @("release", "view", $version) -NoNewWindow -Wait -PassThru -RedirectStandardOutput $null -RedirectStandardError $null
-if ($releaseCheck.ExitCode -eq 0) {
+$releaseList = & $gh release list --limit 200
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Could not query existing releases."
+    exit 1
+}
+
+if ($releaseList | Select-String -SimpleMatch $version) {
     Write-Host "Release $version already exists."
     exit 1
 }
