@@ -9,7 +9,9 @@ Configuracion
 2) Completa SUPABASE_URL y SUPABASE_KEY
 
 Ejecutar
-python app.py
+1) powershell -ExecutionPolicy Bypass -File run.ps1
+2) O usa directamente:
+   .\.venv\Scripts\python.exe app.py
 
 Seguridad
 - No subas .env al repositorio.

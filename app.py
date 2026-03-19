@@ -25,13 +25,44 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 
+def _show_missing_dependency_error(module_name):
+    app_root = os.path.abspath(os.path.dirname(__file__))
+    requirements_path = os.path.join(app_root, "requirements.txt")
+    venv_python = os.path.join(app_root, ".venv", "Scripts", "python.exe")
 
-import requests
+    if os.path.exists(venv_python):
+        install_python = venv_python
+        run_python = venv_python
+    else:
+        install_python = sys.executable
+        run_python = sys.executable
 
-from dotenv import load_dotenv
-from openpyxl import load_workbook
+    install_cmd = f'"{install_python}" -m pip install -r "{requirements_path}"'
+    run_cmd = f'"{run_python}" "{os.path.join(app_root, "app.py")}"'
+    message = (
+        f"Falta el modulo '{module_name}'.\n\n"
+        "Instala las dependencias con:\n"
+        f"{install_cmd}\n\n"
+        "Luego ejecuta la app con:\n"
+        f"{run_cmd}"
+    )
 
-from supabase import create_client, Client
+    print(message, file=sys.stderr)
+    if os.name == "nt":
+        try:
+            ctypes.windll.user32.MessageBoxW(0, message, "RECA Empresas", 0x10)
+        except Exception:
+            pass
+
+
+try:
+    import requests
+    from dotenv import load_dotenv
+    from openpyxl import load_workbook
+    from supabase import create_client, Client
+except ModuleNotFoundError as exc:
+    _show_missing_dependency_error(exc.name)
+    raise SystemExit(1) from exc
 
 
 
@@ -45,7 +76,7 @@ from supabase import create_client, Client
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.17"
+APP_VERSION = "1.0.18"
 
 GITHUB_OWNER = "auyaban"
 
@@ -55,8 +86,45 @@ UPDATE_ASSET_NAME = "RECA_Setup.exe"
 UPDATE_HASH_NAME = "RECA_Setup.exe.sha256"
 
 COLOR_PURPLE = "#7C3D96"
+COLOR_PURPLE_DARK = "#5E2D73"
 COLOR_TEAL = "#07B499"
+COLOR_TEAL_DARK = "#059680"
 COLOR_LIGHT_BG = "#F7F5FA"
+
+# --- Colores semanticos ---
+COLOR_DANGER = "#dc3545"
+COLOR_DANGER_DARK = "#c82333"
+COLOR_SUCCESS = "#28a745"
+COLOR_SUCCESS_DARK = "#218838"
+COLOR_WARNING = "#FF9800"
+COLOR_WARNING_DARK = "#E68900"
+COLOR_INFO = "#1E88E5"
+COLOR_INFO_DARK = "#1565C0"
+COLOR_NEUTRAL = "#455A64"
+COLOR_NEUTRAL_DARK = "#37474F"
+COLOR_BORDER = "#E0DAE8"
+COLOR_TEXT = "#2D2D3F"
+COLOR_WHITE = "#FFFFFF"
+TREE_ROW_ALT = "#F3F0F7"
+
+# --- Tipografia ---
+FONT_FAMILY = "Segoe UI" if sys.platform == "win32" else "Arial"
+FONT_H1 = (FONT_FAMILY, 20, "bold")
+FONT_H2 = (FONT_FAMILY, 16, "bold")
+FONT_H3 = (FONT_FAMILY, 12, "bold")
+FONT_BODY = (FONT_FAMILY, 11)
+FONT_BODY_BOLD = (FONT_FAMILY, 11, "bold")
+FONT_SMALL = (FONT_FAMILY, 9)
+
+# --- Espaciado ---
+SP_XS = 4
+SP_SM = 8
+SP_MD = 16
+SP_LG = 24
+
+# --- Botones ---
+BTN_PADX = 16
+BTN_PADY = 8
 
 REQUEST_HEADERS = {"User-Agent": f"{APP_NAME}/{APP_VERSION}"}
 
@@ -160,7 +228,7 @@ class SplashScreen(tk.Toplevel):
         tk.Label(
             container,
             text="Bienvenido al sistema de gestion de empresas de RECA",
-            font=("Arial", 12, "bold"),
+            font=FONT_H3,
             bg="white",
             fg=COLOR_PURPLE,
             wraplength=420,
@@ -170,25 +238,12 @@ class SplashScreen(tk.Toplevel):
         self.status_label = tk.Label(
             container,
             text="Iniciando...",
-            font=("Arial", 10),
+            font=FONT_BODY,
             bg="white",
             fg=COLOR_TEAL,
         )
         self.status_label.pack(pady=(0, 8))
 
-        style = ttk.Style(self)
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-        style.configure(
-            "Reca.Horizontal.TProgressbar",
-            background=COLOR_TEAL,
-            troughcolor="#EDE7F3",
-            bordercolor="#EDE7F3",
-            lightcolor=COLOR_TEAL,
-            darkcolor=COLOR_TEAL,
-        )
         self.progress = ttk.Progressbar(
             container,
             length=360,
@@ -202,8 +257,7 @@ class SplashScreen(tk.Toplevel):
         self.log_box.configure(state="disabled")
         self.log_box.pack(fill=tk.BOTH, expand=False)
 
-        self._center_window(520, 420)
-        _maximize_window(self)
+        self._center_window(520, 480)
 
     def _center_window(self, width, height):
         self.update_idletasks()
@@ -790,7 +844,6 @@ class FormularioEmpresa(tk.Toplevel):
         titulo = "Editar Empresa" if empresa else "Nueva Empresa"
         self.title(titulo)
         self.geometry("900x700")
-        self.resizable(False, False)
         _maximize_window(self)
 
         # Cargar catalogos
@@ -802,6 +855,8 @@ class FormularioEmpresa(tk.Toplevel):
         # Convertir en modal
         self.transient(parent)
         self.grab_set()
+        self.bind("<Control-s>", lambda e: self.guardar())
+        self.bind("<Escape>", lambda e: self.destroy())
 
     def crear_formulario(self):
 
@@ -819,7 +874,7 @@ class FormularioEmpresa(tk.Toplevel):
 
             text=titulo_text,
 
-            font=("Arial", 18, "bold"),
+            font=FONT_H2,
             bg=COLOR_LIGHT_BG,
             fg=COLOR_PURPLE,
 
@@ -852,15 +907,16 @@ class FormularioEmpresa(tk.Toplevel):
                 text=titulo,
                 bg=bg,
                 fg=COLOR_PURPLE,
-                font=("Arial", 10, "bold"),
+                font=FONT_H3,
             )
             frame = tk.LabelFrame(
                 parent,
                 labelwidget=title_label,
                 bg=bg,
-                padx=12,
-                pady=8,
+                padx=SP_MD,
+                pady=SP_SM,
                 bd=1,
+                relief="flat",
             )
             frame.grid(row=row, column=0, columnspan=4, sticky="ew", padx=12, pady=8)
             frame.grid_columnconfigure(1, weight=1)
@@ -872,7 +928,7 @@ class FormularioEmpresa(tk.Toplevel):
                 tk.Label(
                     frame,
                     text=label_text,
-                    font=("Arial", 10, "bold"),
+                    font=FONT_BODY_BOLD,
                     bg=bg,
                 ).grid(row=inner_row, column=0, sticky="w", padx=6, pady=4)
 
@@ -918,7 +974,7 @@ class FormularioEmpresa(tk.Toplevel):
 
             width=40,
 
-            font=("Arial", 10)
+            font=FONT_BODY
 
         )
 
@@ -954,7 +1010,7 @@ class FormularioEmpresa(tk.Toplevel):
 
             height=5,
 
-            font=("Arial", 10)
+            font=FONT_BODY
 
         )
 
@@ -979,7 +1035,7 @@ class FormularioEmpresa(tk.Toplevel):
             values=self.CAJAS_COMPENSACION,
             state="readonly",
             width=40,
-            font=("Arial", 10)
+            font=FONT_BODY
         )
 
         if self.empresa:
@@ -997,7 +1053,7 @@ class FormularioEmpresa(tk.Toplevel):
             width=50,
             height=3,
             wrap=tk.WORD,
-            font=("Arial", 10)
+            font=FONT_BODY
         )
 
         if self.empresa:
@@ -1013,7 +1069,7 @@ class FormularioEmpresa(tk.Toplevel):
             values=list(self.ZONAS_COMPENSAR.values()),
             state="normal",
             width=40,
-            font=("Arial", 10)
+            font=FONT_BODY
         )
 
         if self.empresa:
@@ -1029,7 +1085,7 @@ class FormularioEmpresa(tk.Toplevel):
             values=self._asesores,
             state="readonly",
             width=40,
-            font=("Arial", 10)
+            font=FONT_BODY
         )
         if self.empresa:
             valor = self.empresa.get("asesor", "") or ""
@@ -1045,7 +1101,7 @@ class FormularioEmpresa(tk.Toplevel):
             values=self._profesionales,
             state="normal",
             width=40,
-            font=("Arial", 10)
+            font=FONT_BODY
         )
         if self.empresa:
             valor = self.empresa.get("profesional_asignado", "") or ""
@@ -1060,7 +1116,7 @@ class FormularioEmpresa(tk.Toplevel):
 
         """Crea campo de entrada de texto simple"""
 
-        widget = tk.Entry(parent, width=60, font=("Arial", 10))
+        widget = tk.Entry(parent, width=60, font=FONT_BODY, highlightcolor=COLOR_TEAL, highlightthickness=1)
 
 
 
@@ -1201,101 +1257,16 @@ class FormularioEmpresa(tk.Toplevel):
 
         """
 
-        btn_frame = tk.Frame(parent)
-
-        btn_frame.grid(row=row, column=0, columnspan=4, pady=20)
-
-
+        btn_frame = tk.Frame(parent, bg=COLOR_LIGHT_BG)
+        btn_frame.grid(row=row, column=0, columnspan=4, pady=SP_LG)
 
         if self.empresa:
-
-            # Modo edición: Guardar y Eliminar
-
-            tk.Button(
-
-                btn_frame,
-
-                text="Guardar Cambios",
-
-                command=self.guardar,
-
-                bg="#28a745",
-
-                fg="white",
-
-                font=("Arial", 12, "bold"),
-
-                padx=20,
-
-                pady=10
-
-            ).pack(side=tk.LEFT, padx=5)
-
-
-
-            tk.Button(
-
-                btn_frame,
-
-                text="Eliminar",
-
-                command=self.eliminar,
-
-                bg="#dc3545",
-
-                fg="white",
-
-                font=("Arial", 12),
-
-                padx=20,
-
-                pady=10
-
-            ).pack(side=tk.LEFT, padx=5)
-
+            _make_button(btn_frame, "Guardar Cambios", self.guardar, style="success").pack(side=tk.LEFT, padx=SP_SM)
+            _make_button(btn_frame, "Eliminar", self.eliminar, style="danger").pack(side=tk.RIGHT, padx=SP_SM)
         else:
+            _make_button(btn_frame, "Crear Empresa", self.guardar, style="success").pack(side=tk.LEFT, padx=SP_SM)
 
-            # Modo crear
-
-            tk.Button(
-
-                btn_frame,
-
-                text="Crear Empresa",
-
-                command=self.guardar,
-
-                bg="#28a745",
-
-                fg="white",
-
-                font=("Arial", 12, "bold"),
-
-                padx=20,
-
-                pady=10
-
-            ).pack(side=tk.LEFT, padx=5)
-
-
-
-        # Botón cancelar (siempre presente)
-
-        tk.Button(
-
-            btn_frame,
-
-            text="Cancelar",
-
-            command=self.destroy,
-
-            font=("Arial", 12),
-
-            padx=20,
-
-            pady=10
-
-        ).pack(side=tk.LEFT, padx=5)
+        _make_button(btn_frame, "Cancelar", self.destroy, style="outline").pack(side=tk.LEFT, padx=SP_SM)
 
 
 
@@ -1451,13 +1422,14 @@ class FormularioEntidad(tk.Toplevel):
 
         self.title(titulo)
         self.geometry("700x600")
-        self.resizable(False, False)
         _maximize_window(self)
 
         self._crear_formulario()
 
         self.transient(parent)
         self.grab_set()
+        self.bind("<Control-s>", lambda e: self.guardar())
+        self.bind("<Escape>", lambda e: self.destroy())
 
     def _crear_formulario(self):
         scroll = ScrollableFrame(self)
@@ -1470,17 +1442,17 @@ class FormularioEntidad(tk.Toplevel):
             tk.Label(
                 container,
                 text=label,
-                font=("Arial", 10, "bold"),
+                font=FONT_BODY_BOLD,
             ).grid(row=row, column=0, sticky="w", padx=6, pady=4)
 
             if widget_type == "text":
-                widget = scrolledtext.ScrolledText(container, width=50, height=4, font=("Arial", 10))
+                widget = scrolledtext.ScrolledText(container, width=50, height=4, font=FONT_BODY)
                 if self.registro:
                     valor = self.registro.get(campo, "") or ""
                     widget.insert("1.0", valor)
                 widget.grid(row=row, column=1, sticky="ew", padx=6, pady=4)
             else:
-                widget = tk.Entry(container, width=50, font=("Arial", 10))
+                widget = tk.Entry(container, width=50, font=FONT_BODY, highlightcolor=COLOR_TEAL, highlightthickness=1)
                 if self.registro:
                     valor = self.registro.get(campo, "") or ""
                     widget.insert(0, valor)
@@ -1489,50 +1461,16 @@ class FormularioEntidad(tk.Toplevel):
             self.widgets[campo] = widget
             row += 1
 
-        btn_frame = tk.Frame(container)
-        btn_frame.grid(row=row, column=0, columnspan=2, pady=16)
+        btn_frame = tk.Frame(container, bg=COLOR_LIGHT_BG)
+        btn_frame.grid(row=row, column=0, columnspan=2, pady=SP_MD)
 
         if self.registro:
-            tk.Button(
-                btn_frame,
-                text="Guardar Cambios",
-                command=self.guardar,
-                bg="#28a745",
-                fg="white",
-                font=("Arial", 12, "bold"),
-                padx=20,
-                pady=8,
-            ).pack(side=tk.LEFT, padx=6)
-            tk.Button(
-                btn_frame,
-                text="Eliminar",
-                command=self.eliminar,
-                bg="#dc3545",
-                fg="white",
-                font=("Arial", 12),
-                padx=20,
-                pady=8,
-            ).pack(side=tk.LEFT, padx=6)
+            _make_button(btn_frame, "Guardar Cambios", self.guardar, style="success").pack(side=tk.LEFT, padx=SP_SM)
+            _make_button(btn_frame, "Eliminar", self.eliminar, style="danger").pack(side=tk.RIGHT, padx=SP_SM)
         else:
-            tk.Button(
-                btn_frame,
-                text="Crear",
-                command=self.guardar,
-                bg="#28a745",
-                fg="white",
-                font=("Arial", 12, "bold"),
-                padx=20,
-                pady=8,
-            ).pack(side=tk.LEFT, padx=6)
+            _make_button(btn_frame, "Crear", self.guardar, style="success").pack(side=tk.LEFT, padx=SP_SM)
 
-        tk.Button(
-            btn_frame,
-            text="Cancelar",
-            command=self.destroy,
-            font=("Arial", 12),
-            padx=20,
-            pady=8,
-        ).pack(side=tk.LEFT, padx=6)
+        _make_button(btn_frame, "Cancelar", self.destroy, style="outline").pack(side=tk.LEFT, padx=SP_SM)
 
     def guardar(self):
         datos = {}
@@ -1606,16 +1544,16 @@ class AppEntidad:
         self.cargar_registros()
 
     def _crear_interfaz(self):
-        header = tk.Frame(self.root, bg=COLOR_PURPLE, height=80)
+        header = tk.Frame(self.root, bg=COLOR_PURPLE, height=72)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         tk.Label(
             header,
             text=self.root.title(),
-            font=("Arial", 20, "bold"),
+            font=FONT_H1,
             bg=COLOR_PURPLE,
             fg="white",
-        ).pack(side=tk.LEFT, padx=16)
+        ).pack(side=tk.LEFT, padx=SP_MD)
 
         tabla_frame = tk.Frame(self.root)
         tabla_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
@@ -1623,7 +1561,7 @@ class AppEntidad:
         self.contador_label = tk.Label(
             tabla_frame,
             text="Resultados: 0 registros",
-            font=("Arial", 11, "bold")
+            font=FONT_BODY_BOLD
         )
         self.contador_label.grid(row=0, column=0, sticky="w", pady=5)
 
@@ -1646,64 +1584,25 @@ class AppEntidad:
         self.tree.bind("<ButtonRelease-1>", self._seleccionar)
         self.tree.bind("<Double-1>", self._abrir_editar)
 
+        # Filas alternadas
+        self.tree.tag_configure("oddrow", background=TREE_ROW_ALT)
+        self.tree.tag_configure("evenrow", background=COLOR_WHITE)
+
         btn_frame = tk.Frame(self.root, bg=COLOR_LIGHT_BG)
-        btn_frame.pack(fill=tk.X, padx=20, pady=10)
+        btn_frame.pack(fill=tk.X, padx=SP_LG, pady=SP_SM)
 
-        tk.Button(
-            btn_frame,
-            text="Nuevo",
-            command=self.nuevo_registro,
-            font=("Arial", 12, "bold"),
-            bg=COLOR_TEAL,
-            fg="white",
-            padx=15,
-            pady=8,
-        ).pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            btn_frame,
-            text="Editar",
-            command=self.editar_registro,
-            font=("Arial", 12, "bold"),
-            bg=COLOR_PURPLE,
-            fg="white",
-            padx=15,
-            pady=8,
-        ).pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            btn_frame,
-            text="Eliminar",
-            command=self.eliminar_registro,
-            font=("Arial", 12, "bold"),
-            bg="#dc3545",
-            fg="white",
-            padx=15,
-            pady=8,
-        ).pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            btn_frame,
-            text="Refrescar",
-            command=self.cargar_registros,
-            font=("Arial", 12, "bold"),
-            bg=COLOR_TEAL,
-            fg="white",
-            padx=15,
-            pady=8,
-        ).pack(side=tk.LEFT, padx=5)
+        _make_button(btn_frame, "Nuevo", self.nuevo_registro, style="primary").pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(btn_frame, "Editar", self.editar_registro, style="secondary").pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(btn_frame, "Refrescar", self.cargar_registros, style="outline").pack(side=tk.LEFT, padx=SP_XS)
 
         if self.table == "profesionales":
-            tk.Button(
-                btn_frame,
-                text="Restablecer contraseña",
-                command=self.restablecer_contrasena_profesional,
-                font=("Arial", 12, "bold"),
-                bg="#FF9800",
-                fg="white",
-                padx=15,
-                pady=8,
-            ).pack(side=tk.LEFT, padx=5)
+            _make_button(btn_frame, "Restablecer contraseña", self.restablecer_contrasena_profesional, style="warning").pack(side=tk.RIGHT, padx=SP_XS)
+
+        _make_button(btn_frame, "Eliminar", self.eliminar_registro, style="danger").pack(side=tk.RIGHT, padx=SP_XS)
+
+        # Atajos de teclado
+        self.root.bind("<Control-n>", lambda e: self.nuevo_registro())
+        self.root.bind("<F5>", lambda e: self.cargar_registros())
 
     def restablecer_contrasena_profesional(self):
         if self.table != "profesionales":
@@ -1723,7 +1622,6 @@ class AppEntidad:
         )
         usuario_login = (self.registro_seleccionado.get("usuario_login") or "").strip()
         correo_profesional = (self.registro_seleccionado.get("correo_profesional") or "").strip()
-        auth_user_id = str(self.registro_seleccionado.get("auth_user_id") or "").strip()
         nueva = DEFAULT_PROFESIONAL_TEMP_PASSWORD
 
         if not usuario_login:
@@ -1738,13 +1636,6 @@ class AppEntidad:
                 "Error",
                 "Este profesional no tiene 'Correo Profesional' configurado.\n"
                 "Sin ese dato no puede iniciar sesion en RECA Inclusion Laboral.",
-            )
-            return
-        if not auth_user_id:
-            messagebox.showerror(
-                "Error",
-                "Este profesional no tiene cuenta Auth enlazada en Supabase.\n"
-                "Vincula la cuenta antes de restablecer la contrasena.",
             )
             return
         confirmar = messagebox.askyesno(
@@ -1772,12 +1663,15 @@ class AppEntidad:
 
             result = response.data
             auth_updated = False
+            has_auth_user = False
             if isinstance(result, dict):
                 auth_updated = bool(result.get("auth_user_updated"))
+                has_auth_user = bool(result.get("has_auth_user"))
             LOG.info(
-                "Password reset for profesional_id=%s auth_updated=%s usuario_login=%s",
+                "Password reset for profesional_id=%s auth_updated=%s has_auth_user=%s usuario_login=%s",
                 profesional_id,
                 auth_updated,
+                has_auth_user,
                 usuario_login,
             )
 
@@ -1786,7 +1680,8 @@ class AppEntidad:
                 "Contrasena actualizada correctamente.\n\n"
                 f"Usuario login: {usuario_login}\n"
                 f"Contrasena temporal: {nueva}\n"
-                f"Actualizada en Auth: {'Si' if auth_updated else 'No (sin auth_user_id)'}",
+                f"Cuenta Auth enlazada: {'Si' if has_auth_user else 'No'}\n"
+                f"Actualizada en Auth: {'Si' if auth_updated else 'No'}",
             )
             self.cargar_registros()
         except Exception as e:
@@ -1820,13 +1715,15 @@ class AppEntidad:
             self.tree.delete(item)
 
     def _mostrar_registros(self, registros):
-        for registro in registros:
+        for idx, registro in enumerate(registros):
             key_value = registro.get(self.key_field)
             key_str = str(key_value) if key_value is not None else ""
             if key_str:
                 self._registro_por_key[key_str] = registro
+            row_tag = "oddrow" if idx % 2 else "evenrow"
+            tags = (key_str, row_tag) if key_str else (row_tag,)
             values = [registro.get(col, "") for col in self.columns]
-            self.tree.insert("", tk.END, values=values, tags=(key_str,) if key_str else ())
+            self.tree.insert("", tk.END, values=values, tags=tags)
 
     def _seleccionar(self, event):
         selection = self.tree.selection()
@@ -1908,51 +1805,56 @@ class AppMenu:
         self._fetch_latest_version_async()
 
     def _crear_interfaz(self):
-        header = tk.Frame(self.root, bg=COLOR_PURPLE, height=90)
+        # Header
+        header = tk.Frame(self.root, bg=COLOR_PURPLE, height=72)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
 
         tk.Label(
             header,
             text="RECA - Panel principal",
-            font=("Arial", 24, "bold"),
+            font=FONT_H1,
             bg=COLOR_PURPLE,
             fg="white",
-        ).pack(side=tk.LEFT, padx=20)
+        ).pack(side=tk.LEFT, padx=SP_LG)
 
+        self.update_btn = _make_button(header, "Actualizar app", self._manual_update, style="outline", font=FONT_SMALL)
+        self.update_btn.pack(side=tk.RIGHT, padx=SP_LG)
+
+        # Body
         body_scroll = ScrollableFrame(self.root, bg=COLOR_LIGHT_BG)
-        body_scroll.pack(fill=tk.BOTH, expand=True, padx=40, pady=(40, 20))
+        body_scroll.pack(fill=tk.BOTH, expand=True)
         body = body_scroll.content
 
         tk.Label(
             body,
             text="Selecciona un modulo",
-            font=("Arial", 18, "bold"),
+            font=FONT_H2,
             bg=COLOR_LIGHT_BG,
             fg=COLOR_PURPLE,
-        ).pack(pady=20)
+        ).pack(pady=(SP_LG * 2, SP_MD))
 
-        btn_frame = tk.Frame(body, bg=COLOR_LIGHT_BG)
-        btn_frame.pack(pady=20)
+        # Cards grid
+        cards_frame = tk.Frame(body, bg=COLOR_LIGHT_BG)
+        cards_frame.pack(pady=SP_MD)
 
-        self.update_btn = tk.Button(
-            btn_frame,
-            text="Actualizar app",
-            command=self._manual_update,
-            font=("Arial", 9, "bold"),
-            bg=COLOR_TEAL,
-            fg="white",
-            padx=10,
-            pady=4,
-            width=16,
-        )
-        self.update_btn.pack(pady=(0, 12))
+        modulos = [
+            ("Empresas", "Gestion de empresas y clientes", self._abrir_empresas),
+            ("Asesores", "Asesores de Compensar", self._abrir_asesores),
+            ("Gestores", "Gestores de empleo", self._abrir_gestores),
+            ("Profesionales", "Profesionales de RECA", self._abrir_profesionales),
+            ("Interpretes", "Interpretes de lengua de senas", self._abrir_interpretes),
+        ]
 
-        self._crear_boton_modulo(btn_frame, "Empresas", self._abrir_empresas)
-        self._crear_boton_modulo(btn_frame, "Asesores", self._abrir_asesores)
-        self._crear_boton_modulo(btn_frame, "Gestores", self._abrir_gestores)
-        self._crear_boton_modulo(btn_frame, "Profesionales", self._abrir_profesionales)
-        self._crear_boton_modulo(btn_frame, "Interpretes", self._abrir_interpretes)
+        for idx, (titulo, desc, cmd) in enumerate(modulos):
+            row, col = divmod(idx, 2)
+            self._crear_card_modulo(cards_frame, titulo, desc, cmd).grid(
+                row=row, column=col, padx=SP_SM, pady=SP_SM, sticky="nsew"
+            )
+
+        cards_frame.grid_columnconfigure(0, weight=1)
+        cards_frame.grid_columnconfigure(1, weight=1)
+
         self._crear_footer()
 
     def _crear_footer(self):
@@ -1966,7 +1868,7 @@ class AppMenu:
         self.version_label = tk.Label(
             info_wrap,
             text=f"Version: {APP_VERSION} | GitHub: --",
-            font=("Arial", 8),
+            font=FONT_SMALL,
             bg=COLOR_LIGHT_BG,
             fg="#666666",
             justify="left",
@@ -2008,18 +1910,43 @@ class AppMenu:
         if check_for_updates():
             self.root.destroy()
 
-    def _crear_boton_modulo(self, parent, texto, comando):
-        tk.Button(
+    def _crear_card_modulo(self, parent, titulo, descripcion, comando):
+        card = tk.Frame(
             parent,
-            text=texto,
-            command=comando,
-            font=("Arial", 14, "bold"),
-            bg=COLOR_TEAL,
-            fg="white",
-            padx=30,
-            pady=12,
-            width=16,
-        ).pack(pady=10)
+            bg=COLOR_WHITE,
+            highlightthickness=1,
+            highlightbackground=COLOR_BORDER,
+            cursor="hand2",
+            padx=SP_LG,
+            pady=SP_MD,
+        )
+        card.configure(width=280, height=90)
+        card.pack_propagate(False)
+
+        tk.Label(
+            card, text=titulo, font=FONT_H3, bg=COLOR_WHITE, fg=COLOR_PURPLE, anchor="w",
+        ).pack(fill=tk.X, pady=(SP_XS, 2))
+        tk.Label(
+            card, text=descripcion, font=FONT_BODY, bg=COLOR_WHITE, fg="#666666", anchor="w",
+        ).pack(fill=tk.X)
+
+        def on_enter(_e):
+            card.config(highlightbackground=COLOR_TEAL, highlightthickness=2)
+        def on_leave(_e):
+            card.config(highlightbackground=COLOR_BORDER, highlightthickness=1)
+        def on_click(_e):
+            comando()
+
+        for widget in (card, *card.winfo_children()):
+            widget.bind("<Enter>", on_enter)
+            widget.bind("<Leave>", on_leave)
+            widget.bind("<Button-1>", on_click)
+            try:
+                widget.config(cursor="hand2")
+            except tk.TclError:
+                pass
+
+        return card
 
     def _crear_ventana(self, titulo):
         ventana = tk.Toplevel(self.root)
@@ -2334,14 +2261,17 @@ class AppRECA:
         self._crear_footer()
 
         # Cargar version publicada (en background)
-
         self._fetch_latest_version_async()
 
+        # Atajos de teclado
+        self.root.bind("<Control-n>", lambda e: self.nueva_empresa())
+        self.root.bind("<Control-f>", lambda e: self.search_entry.focus_set())
+        self.root.bind("<F5>", lambda e: self.cargar_todas_empresas())
 
 
     def _crear_header(self):
         """Crea el encabezado de la aplicacion"""
-        header = tk.Frame(self.root, bg=COLOR_PURPLE, height=90)
+        header = tk.Frame(self.root, bg=COLOR_PURPLE, height=72)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         header.grid_rowconfigure(0, weight=1)
@@ -2351,13 +2281,13 @@ class AppRECA:
         if os.path.exists(LOGO_PATH):
             try:
                 logo = tk.PhotoImage(file=LOGO_PATH)
-                max_size = 56
+                max_size = 48
                 scale = max(1, logo.width() // max_size, logo.height() // max_size)
                 if scale > 1:
                     logo = logo.subsample(scale, scale)
                 self.header_logo = logo
                 tk.Label(header, image=self.header_logo, bg=COLOR_PURPLE).grid(
-                    row=0, column=0, padx=(16, 8), pady=12, sticky="w"
+                    row=0, column=0, padx=(SP_MD, SP_SM), pady=SP_SM, sticky="w"
                 )
             except Exception:
                 self.header_logo = None
@@ -2365,7 +2295,7 @@ class AppRECA:
         tk.Label(
             header,
             text="RECA - Gestion de Empresas",
-            font=("Arial", 22, "bold"),
+            font=FONT_H1,
             bg=COLOR_PURPLE,
             fg="white",
         ).grid(row=0, column=1, sticky="w", padx=(0, 16))
@@ -2379,7 +2309,7 @@ class AppRECA:
         tk.Label(
             search_frame,
             text="Buscar:",
-            font=("Arial", 12),
+            font=FONT_BODY,
             bg=COLOR_LIGHT_BG,
             fg=COLOR_PURPLE,
         ).pack(side=tk.LEFT, padx=5)
@@ -2389,19 +2319,40 @@ class AppRECA:
             search_frame,
             textvariable=self.search_var,
             values=[],
-            font=("Arial", 12),
+            font=FONT_BODY,
             width=38,
             state="normal",
         )
-        self.search_entry.pack(side=tk.LEFT, padx=5)
+        self.search_entry.pack(side=tk.LEFT, padx=SP_XS)
         self.search_entry.bind("<Return>", lambda e: self.buscar_empresas())
         self.search_entry.bind("<KeyRelease>", lambda e: self._update_autocomplete())
+
+        # Placeholder
+        self._placeholder = "Escribe para buscar..."
+        self._placeholder_active = True
+        self.search_entry.set(self._placeholder)
+        self.search_entry.config(foreground="#999999")
+
+        def _on_focus_in(_e):
+            if self._placeholder_active:
+                self.search_entry.set("")
+                self.search_entry.config(foreground=COLOR_TEXT)
+                self._placeholder_active = False
+
+        def _on_focus_out(_e):
+            if not self.search_var.get().strip():
+                self.search_entry.set(self._placeholder)
+                self.search_entry.config(foreground="#999999")
+                self._placeholder_active = True
+
+        self.search_entry.bind("<FocusIn>", _on_focus_in, add="+")
+        self.search_entry.bind("<FocusOut>", _on_focus_out, add="+")
 
         # Selector de campo
         tk.Label(
             search_frame,
             text="En:",
-            font=("Arial", 12),
+            font=FONT_BODY,
             bg=COLOR_LIGHT_BG,
             fg=COLOR_PURPLE,
         ).pack(side=tk.LEFT, padx=5)
@@ -2417,38 +2368,9 @@ class AppRECA:
         self.campo_busqueda.bind("<<ComboboxSelected>>", lambda e: self._on_search_field_change())
 
         # Botones de busqueda
-        tk.Button(
-            search_frame,
-            text="Buscar",
-            command=self.buscar_empresas,
-            font=("Arial", 11, "bold"),
-            bg=COLOR_PURPLE,
-            fg="white",
-            padx=10,
-            pady=5,
-        ).pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            search_frame,
-            text="Limpiar",
-            command=self.limpiar_busqueda,
-            font=("Arial", 11, "bold"),
-            bg=COLOR_TEAL,
-            fg="white",
-            padx=10,
-            pady=5,
-        ).pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            search_frame,
-            text="Filtros",
-            command=self._toggle_filtros,
-            font=("Arial", 11, "bold"),
-            bg="#455A64",
-            fg="white",
-            padx=10,
-            pady=5,
-        ).pack(side=tk.LEFT, padx=5)
+        _make_button(search_frame, "Buscar", self.buscar_empresas, style="secondary", font=FONT_BODY_BOLD).pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(search_frame, "Limpiar", self.limpiar_busqueda, style="outline", font=FONT_BODY_BOLD).pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(search_frame, "Filtros", self._toggle_filtros, style="neutral", font=FONT_BODY_BOLD).pack(side=tk.LEFT, padx=SP_XS)
 
     def _crear_footer(self):
         footer = tk.Frame(self.root, bg=COLOR_LIGHT_BG, height=24)
@@ -2457,7 +2379,7 @@ class AppRECA:
         self.version_label = tk.Label(
             footer,
             text=f"Version: {APP_VERSION} | GitHub: --",
-            font=("Arial", 8),
+            font=FONT_SMALL,
             bg=COLOR_LIGHT_BG,
             fg="#666666",
         )
@@ -2488,7 +2410,7 @@ class AppRECA:
         tk.Label(
             self.filtros_frame,
             text="Filtros:",
-            font=("Arial", 12, "bold"),
+            font=FONT_H3,
             bg=COLOR_LIGHT_BG,
             fg=COLOR_PURPLE,
         ).grid(row=0, column=0, sticky="w", padx=5, pady=5)
@@ -2509,27 +2431,11 @@ class AppRECA:
             self.filtros_frame, "Estado", 1, 3
         )
 
-        tk.Button(
-            self.filtros_frame,
-            text="Aplicar",
-            command=self.aplicar_filtros,
-            font=("Arial", 10, "bold"),
-            bg=COLOR_PURPLE,
-            fg="white",
-            padx=10,
-            pady=4,
-        ).grid(row=1, column=5, padx=5, pady=5, sticky="w")
+        btn_aplicar = _make_button(self.filtros_frame, "Aplicar", self.aplicar_filtros, style="secondary", font=FONT_BODY_BOLD)
+        btn_aplicar.grid(row=1, column=5, padx=SP_XS, pady=SP_XS, sticky="w")
 
-        tk.Button(
-            self.filtros_frame,
-            text="Limpiar Filtros",
-            command=self.limpiar_filtros,
-            font=("Arial", 10, "bold"),
-            bg=COLOR_TEAL,
-            fg="white",
-            padx=10,
-            pady=4,
-        ).grid(row=1, column=6, padx=5, pady=5, sticky="w")
+        btn_limpiar = _make_button(self.filtros_frame, "Limpiar Filtros", self.limpiar_filtros, style="outline", font=FONT_BODY_BOLD)
+        btn_limpiar.grid(row=1, column=6, padx=SP_XS, pady=SP_XS, sticky="w")
 
         self.filtros_frame.grid_columnconfigure(2, minsize=8)
         self.filtros_frame.grid_columnconfigure(4, minsize=8)
@@ -2538,7 +2444,7 @@ class AppRECA:
         tk.Label(
             parent,
             text=f"{label}:",
-            font=("Arial", 10),
+            font=FONT_BODY,
             bg=COLOR_LIGHT_BG,
             fg=COLOR_PURPLE,
         ).grid(row=row, column=col, sticky="e", padx=5, pady=5)
@@ -2548,7 +2454,7 @@ class AppRECA:
             values=["Todos"],
             state="readonly",
             width=24,
-            font=("Arial", 10),
+            font=FONT_BODY,
         )
         combo.set("Todos")
         combo.grid(row=row, column=col + 1, sticky="w", padx=5, pady=5)
@@ -2563,7 +2469,7 @@ class AppRECA:
         self.contador_label = tk.Label(
             tabla_frame,
             text="Resultados: 0 empresas",
-            font=("Arial", 11, "bold")
+            font=FONT_BODY_BOLD
         )
         self.contador_label.grid(row=0, column=0, sticky="w", pady=5)
 
@@ -2611,6 +2517,10 @@ class AppRECA:
         self.tree.bind("<Button-5>", lambda e: self._maybe_load_next())
         self.tree.bind("<KeyRelease-Next>", lambda e: self._maybe_load_next())
         self.tree.bind("<Configure>", lambda e: self._maybe_load_next())
+
+        # Filas alternadas
+        self.tree.tag_configure("oddrow", background=TREE_ROW_ALT)
+        self.tree.tag_configure("evenrow", background=COLOR_WHITE)
 
     def _reset_paginacion(self):
         self._offset = 0
@@ -2701,62 +2611,13 @@ class AppRECA:
     def _crear_botones_accion(self):
         """Crea los botones de accion principales"""
         btn_frame = tk.Frame(self.root, bg=COLOR_LIGHT_BG)
-        btn_frame.pack(fill=tk.X, padx=20, pady=10)
+        btn_frame.pack(fill=tk.X, padx=SP_LG, pady=SP_SM)
 
-        tk.Button(
-            btn_frame,
-            text="Nueva Empresa",
-            command=self.nueva_empresa,
-            font=("Arial", 12, "bold"),
-            bg=COLOR_TEAL,
-            fg="white",
-            padx=15,
-            pady=8,
-        ).pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            btn_frame,
-            text="Importar Excel",
-            command=self.importar_empresas_excel,
-            font=("Arial", 12, "bold"),
-            bg="#1E88E5",
-            fg="white",
-            padx=15,
-            pady=8,
-        ).pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            btn_frame,
-            text="Editar",
-            command=self.editar_empresa,
-            font=("Arial", 12, "bold"),
-            bg=COLOR_PURPLE,
-            fg="white",
-            padx=15,
-            pady=8,
-        ).pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            btn_frame,
-            text="Eliminar",
-            command=self.eliminar_empresa,
-            font=("Arial", 12, "bold"),
-            bg="#dc3545",
-            fg="white",
-            padx=15,
-            pady=8,
-        ).pack(side=tk.LEFT, padx=5)
-
-        tk.Button(
-            btn_frame,
-            text="Refrescar",
-            command=self.cargar_todas_empresas,
-            font=("Arial", 12, "bold"),
-            bg=COLOR_TEAL,
-            fg="white",
-            padx=15,
-            pady=8,
-        ).pack(side=tk.LEFT, padx=5)
+        _make_button(btn_frame, "Nueva Empresa", self.nueva_empresa, style="primary").pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(btn_frame, "Importar Excel", self.importar_empresas_excel, style="info").pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(btn_frame, "Editar", self.editar_empresa, style="secondary").pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(btn_frame, "Refrescar", self.cargar_todas_empresas, style="outline").pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(btn_frame, "Eliminar", self.eliminar_empresa, style="danger").pack(side=tk.RIGHT, padx=SP_XS)
 
     def _build_excel_index_map(self, headers):
         header_keys = [_header_key(h) for h in headers]
@@ -2918,7 +2779,7 @@ class AppRECA:
             tk.Label(
                 frame,
                 text=f"Mostrando {max_preview} de {len(rows)} registros",
-                font=("Arial", 9),
+                font=FONT_SMALL,
                 fg="#666666",
             ).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
@@ -2962,27 +2823,8 @@ class AppRECA:
                         tree.item(item_id, values=values)
                 _notify()
 
-            tk.Button(
-                controls,
-                text="Marcar todos",
-                command=lambda: set_all(True),
-                font=("Arial", 9, "bold"),
-                bg=COLOR_TEAL,
-                fg="white",
-                padx=8,
-                pady=3,
-            ).pack(side=tk.LEFT, padx=(0, 6))
-
-            tk.Button(
-                controls,
-                text="Desmarcar todos",
-                command=lambda: set_all(False),
-                font=("Arial", 9, "bold"),
-                bg="#607D8B",
-                fg="white",
-                padx=8,
-                pady=3,
-            ).pack(side=tk.LEFT)
+            _make_button(controls, "Marcar todos", lambda: set_all(True), style="primary", font=FONT_SMALL).pack(side=tk.LEFT, padx=(0, SP_SM))
+            _make_button(controls, "Desmarcar todos", lambda: set_all(False), style="outline", font=FONT_SMALL).pack(side=tk.LEFT)
 
             _notify()
 
@@ -3029,7 +2871,7 @@ class AppRECA:
         tk.Label(
             wrap,
             text="Resumen de importacion de empresas",
-            font=("Arial", 16, "bold"),
+            font=FONT_H2,
             bg=COLOR_LIGHT_BG,
             fg=COLOR_PURPLE,
         ).pack(anchor="w")
@@ -3037,7 +2879,7 @@ class AppRECA:
         tk.Label(
             wrap,
             text=f"Archivo: {file_path}",
-            font=("Arial", 10),
+            font=FONT_BODY,
             bg=COLOR_LIGHT_BG,
             fg="#4a4a4a",
             wraplength=1100,
@@ -3053,7 +2895,7 @@ class AppRECA:
         tk.Label(
             wrap,
             text=summary,
-            font=("Arial", 11, "bold"),
+            font=FONT_BODY_BOLD,
             bg=COLOR_LIGHT_BG,
             fg=COLOR_TEAL,
         ).pack(anchor="w", pady=(0, 10))
@@ -3091,30 +2933,18 @@ class AppRECA:
         if nuevas_selection is not None:
             nuevas_selection["on_change"] = refresh_confirm_button
 
-        confirm_btn = tk.Button(
+        confirm_btn = _make_button(
             btn_row,
-            text=f"Confirmar y subir {len(nuevas)}",
-            command=lambda: self._confirmar_subida_importacion_excel(window, selected_rows()),
-            font=("Arial", 11, "bold"),
-            bg=COLOR_TEAL,
-            fg="white",
-            padx=12,
-            pady=6,
+            f"Confirmar y subir {len(nuevas)}",
+            lambda: self._confirmar_subida_importacion_excel(window, selected_rows()),
+            style="primary",
+            font=FONT_BODY_BOLD,
             state=tk.NORMAL if nuevas else tk.DISABLED,
         )
-        confirm_btn.pack(side=tk.LEFT, padx=(0, 8))
+        confirm_btn.pack(side=tk.LEFT, padx=(0, SP_SM))
         refresh_confirm_button()
 
-        tk.Button(
-            btn_row,
-            text="Cerrar",
-            command=window.destroy,
-            font=("Arial", 11, "bold"),
-            bg=COLOR_PURPLE,
-            fg="white",
-            padx=12,
-            pady=6,
-        ).pack(side=tk.LEFT)
+        _make_button(btn_row, "Cerrar", window.destroy, style="secondary", font=FONT_BODY_BOLD).pack(side=tk.LEFT)
 
     def importar_empresas_excel(self):
         if not self.supabase:
@@ -3206,7 +3036,7 @@ class AppRECA:
             return
 
         termino = self.search_entry.get().strip()
-        if not termino:
+        if not termino or self._placeholder_active:
             self.cargar_todas_empresas()
             return
         termino = self._sanitize_search_term(termino)
@@ -3224,7 +3054,9 @@ class AppRECA:
 
     def limpiar_busqueda(self):
         """Limpia el campo de busqueda y recarga todas las empresas"""
-        self.search_entry.set("")
+        self.search_entry.set(self._placeholder)
+        self.search_entry.config(foreground="#999999")
+        self._placeholder_active = True
         self.campo_busqueda.set("Todos")
         self.cargar_todas_empresas()
         self._update_autocomplete()
@@ -3485,11 +3317,14 @@ class AppRECA:
 
     def _mostrar_empresas(self, empresas):
         """Muestra empresas en la tabla"""
-        for empresa in empresas:
+        existing_count = len(self.tree.get_children())
+        for idx, empresa in enumerate(empresas, start=existing_count):
             empresa_id = empresa.get("id")
             empresa_id_str = str(empresa_id) if empresa_id is not None else ""
             if empresa_id_str:
                 self._empresa_por_id[empresa_id_str] = empresa
+            row_tag = "oddrow" if idx % 2 else "evenrow"
+            tags = (empresa_id_str, row_tag) if empresa_id_str else (row_tag,)
             self.tree.insert("", tk.END, values=(
                 empresa.get("nombre_empresa", ""),
                 empresa.get("nit_empresa", ""),
@@ -3501,7 +3336,123 @@ class AppRECA:
                 empresa.get("contacto_empresa", ""),
                 empresa.get("telefono_empresa", ""),
                 empresa.get("sede_empresa", ""),
-            ), tags=(empresa_id_str,) if empresa_id_str else ())
+            ), tags=tags)
+
+# ============================================
+# THEME HELPERS
+# ============================================
+
+_BUTTON_STYLES = {
+    "primary": (COLOR_TEAL, "white", COLOR_TEAL_DARK),
+    "secondary": (COLOR_PURPLE, "white", COLOR_PURPLE_DARK),
+    "danger": (COLOR_DANGER, "white", COLOR_DANGER_DARK),
+    "success": (COLOR_SUCCESS, "white", COLOR_SUCCESS_DARK),
+    "info": (COLOR_INFO, "white", COLOR_INFO_DARK),
+    "warning": (COLOR_WARNING, "white", COLOR_WARNING_DARK),
+    "neutral": (COLOR_NEUTRAL, "white", COLOR_NEUTRAL_DARK),
+    "outline": (COLOR_WHITE, COLOR_TEXT, COLOR_LIGHT_BG),
+}
+
+
+def _make_button(parent, text, command, style="primary", font=None, **kwargs):
+    bg, fg, hover_bg = _BUTTON_STYLES.get(style, _BUTTON_STYLES["primary"])
+    btn_font = font if font else FONT_H3
+    btn = tk.Button(
+        parent,
+        text=text,
+        command=command,
+        font=btn_font,
+        bg=bg,
+        fg=fg,
+        activebackground=hover_bg,
+        activeforeground=fg,
+        cursor="hand2",
+        relief="flat",
+        bd=0,
+        padx=BTN_PADX,
+        pady=BTN_PADY,
+        **kwargs,
+    )
+    if style == "outline":
+        btn.config(relief="solid", bd=1, highlightthickness=0)
+
+    def on_enter(_e):
+        btn.config(bg=hover_bg)
+
+    def on_leave(_e):
+        btn.config(bg=bg)
+
+    btn.bind("<Enter>", on_enter)
+    btn.bind("<Leave>", on_leave)
+    return btn
+
+
+def _configure_global_styles(root):
+    style = ttk.Style(root)
+    try:
+        style.theme_use("clam")
+    except tk.TclError:
+        pass
+
+    # Treeview
+    style.configure(
+        "Treeview",
+        rowheight=28,
+        font=FONT_BODY,
+        background=COLOR_WHITE,
+        fieldbackground=COLOR_WHITE,
+        borderwidth=0,
+    )
+    style.configure(
+        "Treeview.Heading",
+        background=COLOR_PURPLE,
+        foreground="white",
+        font=FONT_BODY_BOLD,
+        borderwidth=0,
+        relief="flat",
+    )
+    style.map(
+        "Treeview.Heading",
+        background=[("active", COLOR_PURPLE_DARK)],
+    )
+    style.map(
+        "Treeview",
+        background=[("selected", "#D4C5E2")],
+        foreground=[("selected", COLOR_TEXT)],
+    )
+
+    # Progressbar
+    style.configure(
+        "Reca.Horizontal.TProgressbar",
+        background=COLOR_TEAL,
+        troughcolor="#EDE7F3",
+        bordercolor="#EDE7F3",
+        lightcolor=COLOR_TEAL,
+        darkcolor=COLOR_TEAL,
+    )
+
+    # Combobox
+    style.configure("TCombobox", font=FONT_BODY)
+
+    # Scrollbar
+    style.configure(
+        "TScrollbar",
+        width=10,
+        troughcolor=COLOR_LIGHT_BG,
+        background=COLOR_BORDER,
+        borderwidth=0,
+    )
+    style.map(
+        "TScrollbar",
+        background=[("active", COLOR_PURPLE), ("!active", COLOR_BORDER)],
+    )
+
+    # Entry
+    style.configure("TEntry", font=FONT_BODY)
+
+    # Notebook tabs
+    style.configure("TNotebook.Tab", font=FONT_BODY, padding=(SP_MD, SP_SM))
+
 
 # ============================================
 # MAIN
@@ -3510,6 +3461,7 @@ class AppRECA:
 if __name__ == "__main__":
     LOG.info("App start version %s", APP_VERSION)
     root = tk.Tk()
+    _configure_global_styles(root)
     root.withdraw()
     splash = SplashScreen(root)
     splash.set_status("Preparando...", 5)

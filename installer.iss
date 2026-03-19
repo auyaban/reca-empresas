@@ -1,5 +1,5 @@
 #define MyAppName "RECA Empresas"
-#define MyAppVersion "1.0.13"
+#define MyAppVersion "1.0.18"
 #define MyAppPublisher "RECA"
 #define MyAppExeName "RECA.exe"
 #define SupabaseUrl "https://zvhjosktmfisryqcjxbh.supabase.co"
@@ -17,7 +17,7 @@ OutputBaseFilename=RECA_Setup
 Compression=lzma
 SolidCompression=yes
 PrivilegesRequired=admin
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 SetupIconFile=logo\logo_reca.ico
 

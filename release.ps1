@@ -3,12 +3,44 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 
-if (-not $args[0]) {
-    Write-Host "Usage: .\\release.ps1 vX.Y.Z"
+if (-not (Test-Path "app.py")) {
+    Write-Host "app.py not found."
     exit 1
 }
 
-$version = $args[0]
+$appPy = Get-Content "app.py" -Raw
+$appVersionMatch = [regex]::Match($appPy, 'APP_VERSION\s*=\s*"([^"]+)"')
+if (-not $appVersionMatch.Success) {
+    Write-Host "Could not read APP_VERSION from app.py"
+    exit 1
+}
+
+$appVersion = $appVersionMatch.Groups[1].Value
+$version = if ($args[0]) { $args[0] } else { "v$appVersion" }
+$normalizedVersion = $version.TrimStart("v")
+
+if ($normalizedVersion -ne $appVersion) {
+    Write-Host "Version mismatch: app.py has $appVersion but release requested $version"
+    exit 1
+}
+
+$installerIss = "installer.iss"
+if (-not (Test-Path $installerIss)) {
+    Write-Host "installer.iss not found."
+    exit 1
+}
+
+$installerContent = Get-Content $installerIss -Raw
+$updatedInstallerContent = [regex]::Replace(
+    $installerContent,
+    '#define MyAppVersion "[^"]+"',
+    "#define MyAppVersion `"$appVersion`"",
+    1
+)
+
+if ($installerContent -ne $updatedInstallerContent) {
+    Set-Content -Path $installerIss -Value $updatedInstallerContent -Encoding UTF8
+}
 
 $gh = "gh"
 if (-not (Get-Command $gh -ErrorAction SilentlyContinue)) {
@@ -22,6 +54,12 @@ if (-not (Get-Command $gh -ErrorAction SilentlyContinue)) {
 }
 
 & $gh auth status -h github.com | Out-Null
+
+& $gh release view $version *> $null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "Release $version already exists."
+    exit 1
+}
 
 powershell -ExecutionPolicy Bypass -File build.ps1
 
