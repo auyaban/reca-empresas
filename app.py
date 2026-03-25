@@ -76,7 +76,7 @@ except ModuleNotFoundError as exc:
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.18"
+APP_VERSION = "1.0.19"
 
 GITHUB_OWNER = "auyaban"
 
@@ -753,6 +753,8 @@ def conectar_supabase():
 class FormularioEmpresa(tk.Toplevel):
     """Ventana modal para crear o editar empresas"""
 
+    LARGE_TEXT_FIELDS = {"cargo", "contacto_empresa", "telefono_empresa", "correo_1", "observaciones"}
+
     # Configuracion de campos del formulario
     FIELD_CONFIG = {
         "nombre_empresa": ("Nombre Empresa *", True),
@@ -938,19 +940,17 @@ class FormularioEmpresa(tk.Toplevel):
                     widget = self._crear_campo_caja_compensacion(frame)
                 elif campo == "zona_empresa":
                     widget = self._crear_campo_zona_compensar(frame)
-                elif campo == "cargo":
-                    widget = self._crear_campo_cargo(frame)
+                elif campo in self.LARGE_TEXT_FIELDS:
+                    widget = self._crear_campo_texto_largo(frame, campo)
                 elif campo == "asesor":
                     widget = self._crear_campo_asesor(frame)
                 elif campo == "profesional_asignado":
                     widget = self._crear_campo_profesional(frame)
-                elif campo == "observaciones":
-                    widget = self._crear_campo_observaciones(frame)
                 else:
                     widget = self._crear_campo_texto(frame, campo)
 
                 self.campos[campo] = widget
-                if campo in {"cargo", "observaciones"}:
+                if campo in self.LARGE_TEXT_FIELDS:
                     widget.grid(row=inner_row, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
                 else:
                     widget.grid(row=inner_row, column=1, columnspan=3, sticky="w", padx=6, pady=4)
@@ -991,6 +991,36 @@ class FormularioEmpresa(tk.Toplevel):
         else:
 
             widget.set("En Proceso")
+
+
+
+        return widget
+
+    def _crear_campo_texto_largo(self, parent, campo):
+
+        """Crea areas de texto amplias para campos con contenido largo"""
+
+        widget = scrolledtext.ScrolledText(
+
+            parent,
+
+            width=50,
+
+            height=5 if campo == "observaciones" else 3,
+
+            wrap=tk.WORD,
+
+            font=FONT_BODY
+
+        )
+
+
+
+        if self.empresa:
+
+            valor = self.empresa.get(campo, "") or ""
+
+            widget.insert("1.0", valor)
 
 
 
@@ -1282,7 +1312,7 @@ class FormularioEmpresa(tk.Toplevel):
 
         for campo, widget in self.campos.items():
 
-            if campo in {"cargo", "observaciones"}:
+            if isinstance(widget, scrolledtext.ScrolledText):
 
                 datos[campo] = widget.get("1.0", tk.END).strip()
 
@@ -2611,7 +2641,7 @@ class AppRECA:
     def _crear_botones_accion(self):
         """Crea los botones de accion principales"""
         btn_frame = tk.Frame(self.root, bg=COLOR_LIGHT_BG)
-        btn_frame.pack(fill=tk.X, padx=SP_LG, pady=SP_SM)
+        btn_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=SP_LG, pady=SP_SM)
 
         _make_button(btn_frame, "Nueva Empresa", self.nueva_empresa, style="primary").pack(side=tk.LEFT, padx=SP_XS)
         _make_button(btn_frame, "Importar Excel", self.importar_empresas_excel, style="info").pack(side=tk.LEFT, padx=SP_XS)
