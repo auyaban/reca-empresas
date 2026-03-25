@@ -76,7 +76,7 @@ except ModuleNotFoundError as exc:
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.19"
+APP_VERSION = "1.0.20"
 
 GITHUB_OWNER = "auyaban"
 
@@ -627,7 +627,12 @@ try {
     [System.Windows.Forms.MessageBox]::Show("La actualizacion fallo (codigo $($proc.ExitCode)). Revisa: $LogPath", 'Actualizacion', 'OK', 'Error') | Out-Null
     exit $proc.ExitCode
   }
-  Start-Process -FilePath $Relaunch -ArgumentList $RelaunchArgs | Out-Null
+  $SafeRelaunchArgs = @($RelaunchArgs | Where-Object { $null -ne $_ -and "$_".Trim() -ne '' })
+  if ($SafeRelaunchArgs.Count -gt 0) {
+    Start-Process -FilePath $Relaunch -ArgumentList $SafeRelaunchArgs | Out-Null
+  } else {
+    Start-Process -FilePath $Relaunch | Out-Null
+  }
 } catch {
   try { Add-Content -Path $LogPath -Value ("{0} [ERROR] Update helper failed: {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss,fff'), $_.Exception.Message) } catch {}
   [System.Windows.Forms.MessageBox]::Show("Ocurrio un error durante la actualizacion. Revisa: $LogPath", 'Actualizacion', 'OK', 'Error') | Out-Null
