@@ -76,7 +76,7 @@ except ModuleNotFoundError as exc:
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.20"
+APP_VERSION = "1.0.21"
 
 GITHUB_OWNER = "auyaban"
 
@@ -2289,8 +2289,6 @@ class AppRECA:
 
         # Botones de acción
 
-        self._crear_botones_accion()
-
         # Footer
 
         self._crear_footer()
@@ -2406,6 +2404,10 @@ class AppRECA:
         _make_button(search_frame, "Buscar", self.buscar_empresas, style="secondary", font=FONT_BODY_BOLD).pack(side=tk.LEFT, padx=SP_XS)
         _make_button(search_frame, "Limpiar", self.limpiar_busqueda, style="outline", font=FONT_BODY_BOLD).pack(side=tk.LEFT, padx=SP_XS)
         _make_button(search_frame, "Filtros", self._toggle_filtros, style="neutral", font=FONT_BODY_BOLD).pack(side=tk.LEFT, padx=SP_XS)
+
+        acciones_frame = tk.Frame(search_frame, bg=COLOR_LIGHT_BG)
+        acciones_frame.pack(side=tk.RIGHT, padx=(SP_MD, 0))
+        self._crear_botones_accion(acciones_frame)
 
     def _crear_footer(self):
         footer = tk.Frame(self.root, bg=COLOR_LIGHT_BG, height=24)
@@ -2643,16 +2645,13 @@ class AppRECA:
     def _update_contador(self):
         self.contador_label.config(text=f"Resultados: {len(self.empresas_actuales)} empresas")
 
-    def _crear_botones_accion(self):
+    def _crear_botones_accion(self, parent):
         """Crea los botones de accion principales"""
-        btn_frame = tk.Frame(self.root, bg=COLOR_LIGHT_BG)
-        btn_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=SP_LG, pady=SP_SM)
-
-        _make_button(btn_frame, "Nueva Empresa", self.nueva_empresa, style="primary").pack(side=tk.LEFT, padx=SP_XS)
-        _make_button(btn_frame, "Importar Excel", self.importar_empresas_excel, style="info").pack(side=tk.LEFT, padx=SP_XS)
-        _make_button(btn_frame, "Editar", self.editar_empresa, style="secondary").pack(side=tk.LEFT, padx=SP_XS)
-        _make_button(btn_frame, "Refrescar", self.cargar_todas_empresas, style="outline").pack(side=tk.LEFT, padx=SP_XS)
-        _make_button(btn_frame, "Eliminar", self.eliminar_empresa, style="danger").pack(side=tk.RIGHT, padx=SP_XS)
+        _make_button(parent, "Nueva Empresa", self.nueva_empresa, style="primary").pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(parent, "Importar Excel", self.importar_empresas_excel, style="info").pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(parent, "Editar", self.editar_empresa, style="secondary").pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(parent, "Refrescar", self.cargar_todas_empresas, style="outline").pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(parent, "Eliminar", self.eliminar_empresa, style="danger").pack(side=tk.LEFT, padx=SP_XS)
 
     def _build_excel_index_map(self, headers):
         header_keys = [_header_key(h) for h in headers]
