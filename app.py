@@ -76,7 +76,7 @@ except ModuleNotFoundError as exc:
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.21"
+APP_VERSION = "1.0.22"
 
 GITHUB_OWNER = "auyaban"
 
@@ -2353,7 +2353,7 @@ class AppRECA:
             textvariable=self.search_var,
             values=[],
             font=FONT_BODY,
-            width=38,
+            width=24,
             state="normal",
         )
         self.search_entry.pack(side=tk.LEFT, padx=SP_XS)
@@ -2394,20 +2394,20 @@ class AppRECA:
             search_frame,
             values=["Todos", "Nombre", "NIT", "Ciudad", "Profesional"],
             state="readonly",
-            width=12,
+            width=8,
         )
         self.campo_busqueda.set("Todos")
         self.campo_busqueda.pack(side=tk.LEFT, padx=5)
         self.campo_busqueda.bind("<<ComboboxSelected>>", lambda e: self._on_search_field_change())
 
         # Botones de busqueda
-        _make_button(search_frame, "Buscar", self.buscar_empresas, style="secondary", font=FONT_BODY_BOLD).pack(side=tk.LEFT, padx=SP_XS)
-        _make_button(search_frame, "Limpiar", self.limpiar_busqueda, style="outline", font=FONT_BODY_BOLD).pack(side=tk.LEFT, padx=SP_XS)
-        _make_button(search_frame, "Filtros", self._toggle_filtros, style="neutral", font=FONT_BODY_BOLD).pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(search_frame, "Buscar", self.buscar_empresas, style="secondary", font=FONT_SMALL, padx=8, pady=5).pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(search_frame, "Limpiar", self.limpiar_busqueda, style="outline", font=FONT_SMALL, padx=8, pady=5).pack(side=tk.LEFT, padx=SP_XS)
+        _make_button(search_frame, "Filtros", self._toggle_filtros, style="neutral", font=FONT_SMALL, padx=8, pady=5).pack(side=tk.LEFT, padx=SP_XS)
 
         acciones_frame = tk.Frame(search_frame, bg=COLOR_LIGHT_BG)
-        acciones_frame.pack(side=tk.RIGHT, padx=(SP_MD, 0))
-        self._crear_botones_accion(acciones_frame)
+        acciones_frame.pack(side=tk.LEFT, padx=(SP_SM, 0))
+        self._crear_botones_accion(acciones_frame, compact=True)
 
     def _crear_footer(self):
         footer = tk.Frame(self.root, bg=COLOR_LIGHT_BG, height=24)
@@ -2645,13 +2645,24 @@ class AppRECA:
     def _update_contador(self):
         self.contador_label.config(text=f"Resultados: {len(self.empresas_actuales)} empresas")
 
-    def _crear_botones_accion(self, parent):
+    def _crear_botones_accion(self, parent, compact=False):
         """Crea los botones de accion principales"""
-        _make_button(parent, "Nueva Empresa", self.nueva_empresa, style="primary").pack(side=tk.LEFT, padx=SP_XS)
-        _make_button(parent, "Importar Excel", self.importar_empresas_excel, style="info").pack(side=tk.LEFT, padx=SP_XS)
-        _make_button(parent, "Editar", self.editar_empresa, style="secondary").pack(side=tk.LEFT, padx=SP_XS)
-        _make_button(parent, "Refrescar", self.cargar_todas_empresas, style="outline").pack(side=tk.LEFT, padx=SP_XS)
-        _make_button(parent, "Eliminar", self.eliminar_empresa, style="danger").pack(side=tk.LEFT, padx=SP_XS)
+        btn_font = FONT_SMALL if compact else FONT_BODY_BOLD
+        btn_padx = 7 if compact else BTN_PADX
+        btn_pady = 4 if compact else BTN_PADY
+        labels = {
+            "nueva": "Nueva" if compact else "Nueva Empresa",
+            "importar": "Importar" if compact else "Importar Excel",
+            "editar": "Editar",
+            "refrescar": "Refrescar",
+            "eliminar": "Eliminar",
+        }
+
+        _make_button(parent, labels["nueva"], self.nueva_empresa, style="primary", font=btn_font, padx=btn_padx, pady=btn_pady).pack(side=tk.LEFT, padx=SP_XS // 2)
+        _make_button(parent, labels["importar"], self.importar_empresas_excel, style="info", font=btn_font, padx=btn_padx, pady=btn_pady).pack(side=tk.LEFT, padx=SP_XS // 2)
+        _make_button(parent, labels["editar"], self.editar_empresa, style="secondary", font=btn_font, padx=btn_padx, pady=btn_pady).pack(side=tk.LEFT, padx=SP_XS // 2)
+        _make_button(parent, labels["refrescar"], self.cargar_todas_empresas, style="outline", font=btn_font, padx=btn_padx, pady=btn_pady).pack(side=tk.LEFT, padx=SP_XS // 2)
+        _make_button(parent, labels["eliminar"], self.eliminar_empresa, style="danger", font=btn_font, padx=btn_padx, pady=btn_pady).pack(side=tk.LEFT, padx=SP_XS // 2)
 
     def _build_excel_index_map(self, headers):
         header_keys = [_header_key(h) for h in headers]
@@ -3388,7 +3399,7 @@ _BUTTON_STYLES = {
 }
 
 
-def _make_button(parent, text, command, style="primary", font=None, **kwargs):
+def _make_button(parent, text, command, style="primary", font=None, padx=None, pady=None, **kwargs):
     bg, fg, hover_bg = _BUTTON_STYLES.get(style, _BUTTON_STYLES["primary"])
     btn_font = font if font else FONT_H3
     btn = tk.Button(
@@ -3403,8 +3414,8 @@ def _make_button(parent, text, command, style="primary", font=None, **kwargs):
         cursor="hand2",
         relief="flat",
         bd=0,
-        padx=BTN_PADX,
-        pady=BTN_PADY,
+        padx=BTN_PADX if padx is None else padx,
+        pady=BTN_PADY if pady is None else pady,
         **kwargs,
     )
     if style == "outline":

@@ -9,6 +9,7 @@ if (!(Test-Path $venvPath)) {
 }
 
 $python = Join-Path $venvPath "Scripts\\python.exe"
+$hooksPath = Join-Path $root "hooks"
 
 & $python -m pip install --upgrade pip
 & $python -m pip install -r requirements.txt
@@ -20,6 +21,10 @@ $pyiArgs = @(
     "--clean",
     "--windowed",
     "--add-data", "logo\logo_reca.png;logo",
+    "--additional-hooks-dir", $hooksPath,
+    "--exclude-module", "pydantic.v1",
+    "--exclude-module", "pydantic.mypy",
+    "--exclude-module", "pydantic._hypothesis_plugin",
     "--name", "RECA",
     "--collect-all", "supabase",
     "app.py"
