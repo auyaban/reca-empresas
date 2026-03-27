@@ -76,7 +76,7 @@ except ModuleNotFoundError as exc:
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.22"
+APP_VERSION = "1.0.23"
 
 GITHUB_OWNER = "auyaban"
 
@@ -771,6 +771,7 @@ class FormularioEmpresa(tk.Toplevel):
         "cargo": ("Cargo", False),
         "telefono_empresa": ("Teléfono(s)", False),
         "sede_empresa": ("Sede Empresa", False),
+        "gestion": ("Gestion *", True),
         "zona_empresa": ("Zona Compensar", False),
         "responsable_visita": ("Responsable Visita", False),
         "asesor": ("Asesor", False),
@@ -789,6 +790,7 @@ class FormularioEmpresa(tk.Toplevel):
             "direccion_empresa",
             "ciudad_empresa",
             "sede_empresa",
+            "gestion",
             "responsable_visita",
             "cargo",
             "contacto_empresa",
@@ -812,6 +814,7 @@ class FormularioEmpresa(tk.Toplevel):
     ]
 
     ESTADOS_DISPONIBLES = ["Activa", "En Proceso", "Pausada", "Cerrada", "Inactiva"]
+    GESTIONES_DISPONIBLES = ["RECA", "COMPENSAR"]
     CAJAS_COMPENSACION = ["Compensar", "No Compensar"]
     ZONAS_COMPENSAR = {
         "soacha": "Soacha",
@@ -941,6 +944,8 @@ class FormularioEmpresa(tk.Toplevel):
 
                 if campo == "estado":
                     widget = self._crear_campo_estado(frame)
+                elif campo == "gestion":
+                    widget = self._crear_campo_gestion(frame)
                 elif campo == "caja_compensacion":
                     widget = self._crear_campo_caja_compensacion(frame)
                 elif campo == "zona_empresa":
@@ -1078,6 +1083,24 @@ class FormularioEmpresa(tk.Toplevel):
             widget.set(valor)
         else:
             widget.set("Compensar")
+
+        return widget
+
+    def _crear_campo_gestion(self, parent):
+        """Crea combobox para el campo gestion"""
+        widget = ttk.Combobox(
+            parent,
+            values=self.GESTIONES_DISPONIBLES,
+            state="readonly",
+            width=40,
+            font=FONT_BODY
+        )
+
+        if self.empresa:
+            valor = (self.empresa.get("gestion") or "").strip()
+            widget.set(valor if valor in self.GESTIONES_DISPONIBLES else "")
+        else:
+            widget.set("")
 
         return widget
 
@@ -1337,6 +1360,10 @@ class FormularioEmpresa(tk.Toplevel):
 
             messagebox.showerror("Error", "El nombre de la empresa es obligatorio")
 
+            return
+
+        if not (datos.get("gestion") or "").strip():
+            messagebox.showerror("Error", "La gestion es obligatoria")
             return
 
         # Sincronizar profesional asignado con tabla 'profesionales'
