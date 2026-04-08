@@ -76,7 +76,7 @@ except ModuleNotFoundError as exc:
 
 APP_NAME = "RECA Empresas"
 
-APP_VERSION = "1.0.23"
+APP_VERSION = "1.0.24"
 
 GITHUB_OWNER = "auyaban"
 
@@ -1469,6 +1469,11 @@ class FormularioEmpresa(tk.Toplevel):
 
 class FormularioEntidad(tk.Toplevel):
     """Ventana modal para crear o editar registros genericos"""
+    FIELD_TYPES = {
+        "profesionales": {
+            "antiguedad": "int",
+        },
+    }
 
     def __init__(self, parent, supabase, tabla, campos, key_field, registro=None, titulo="Registro"):
         super().__init__(parent)
@@ -1534,6 +1539,17 @@ class FormularioEntidad(tk.Toplevel):
 
         _make_button(btn_frame, "Cancelar", self.destroy, style="outline").pack(side=tk.LEFT, padx=SP_SM)
 
+    def _coerce_field_value(self, campo, label, valor):
+        field_type = self.FIELD_TYPES.get(self.tabla, {}).get(campo)
+        if field_type == "int":
+            if valor == "":
+                return None
+            try:
+                return int(valor)
+            except ValueError as exc:
+                raise ValueError(f"El campo '{label}' debe ser un numero entero") from exc
+        return valor
+
     def guardar(self):
         datos = {}
         for campo, label, required, widget_type in self.campos_config:
@@ -1544,10 +1560,17 @@ class FormularioEntidad(tk.Toplevel):
             if required and not valor:
                 messagebox.showerror("Error", f"El campo '{label}' es obligatorio")
                 return
-            datos[campo] = valor
+            try:
+                datos[campo] = self._coerce_field_value(campo, label, valor)
+            except ValueError as exc:
+                messagebox.showerror("Error", str(exc))
+                return
 
         try:
             if self.registro:
+                if self._original_key in (None, ""):
+                    messagebox.showerror("Error", "El registro seleccionado no tiene una clave valida para actualizarse")
+                    return
                 self.supabase.table(self.tabla).update(datos).eq(self.key_field, self._original_key).execute()
                 messagebox.showinfo("Éxito", "Registro actualizado correctamente")
             else:
